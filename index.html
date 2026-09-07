@@ -170,7 +170,7 @@
     <div class="tabs">
       <div class="tab active" data-panel="panel-schedule">កាលវិភាគ</div>
       <div class="tab" data-panel="panel-doctors">គ្រូពេទ្យ</div>
-      <div class="tab" data-panel="panel-payroll">ប្រាក់ខែ</div>
+      <div class="tab" data-panel="panel-payroll">ចំនួនថ្ងៃយាម</div>
     </div>
   </header>
 
@@ -723,7 +723,9 @@ function computePayrollClient(year, month) {
       var doc = findDoctorByNameClient(name);
       var key = doc ? doc.ID : name;
       var displayName = doc ? doc.NameSPV : name;
-      if (!spvCounts[key]) spvCounts[key] = { name: displayName, shifts: 0, usd: 0 };
+      if (!spvCounts[key]) spvCounts[key] = { name: displayName, dayShifts: 0, nightShifts: 0, shifts: 0, usd: 0 };
+      var isNight = (f === 'SPV_Night');
+      if (isNight) spvCounts[key].nightShifts++; else spvCounts[key].dayShifts++;
       spvCounts[key].shifts++;
       spvCounts[key].usd += STATE.rates[f] || 0;
     });
@@ -735,15 +737,7 @@ function computePayrollClient(year, month) {
     return c;
   }).sort(function (a, b) { return b.usd - a.usd; });
 
-  var lindaDoc = lindaDoctor();
-  var linda = { usd: 0, khr: 0, shifts: 0 };
-  if (lindaDoc && spvCounts[lindaDoc.ID]) {
-    linda.usd = spvCounts[lindaDoc.ID].usd;
-    linda.shifts = spvCounts[lindaDoc.ID].shifts;
-    linda.khr = linda.usd * STATE.khrPerUsd;
-  }
-
-  return { spv: list, linda: linda };
+  return { spv: list };
 }
 
 function loadPayroll() {
@@ -763,22 +757,16 @@ function renderPayroll(summary) {
   function table(list) {
     if (!list.length) return '<div class="empty-state" style="padding:14px 0;">មិនមានវេនទេ</div>';
     var rows = list.map(function (c) {
-      return '<tr><td>' + escapeHtml(c.name) + '</td><td class="num">' + c.shifts + '</td>' +
+      return '<tr><td>' + escapeHtml(c.name) + '</td>' +
+        '<td class="num">' + c.dayShifts + '</td><td class="num">' + c.nightShifts + '</td><td class="num">' + c.shifts + '</td>' +
         '<td class="num">' + fmtUsd(c.usd) + '</td><td class="num">' + fmtKhr(c.khr) + '</td></tr>';
     }).join('');
-    return '<table class="pay"><thead><tr><th>ឈ្មោះ</th><th style="text-align:right;">ចំនួនវេន</th>' +
+    return '<table class="pay"><thead><tr><th>ឈ្មោះ</th>' +
+      '<th style="text-align:right;">ព្រឹក</th><th style="text-align:right;">យប់</th><th style="text-align:right;">សរុប</th>' +
       '<th style="text-align:right;">USD</th><th style="text-align:right;">KHR</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
   var html = '<div class="pay-grid"><div class="pay-col"><h3 class="spv">SPV</h3>' + table(summary.spv) + '</div></div>';
-
-  if (summary.linda && summary.linda.shifts) {
-    html += '<div class="linda-box">' +
-      '<b>ប្រាក់ខែសរុបរបស់អ្នក ⭐</b><br>' +
-      'ចំនួនវេន: ' + summary.linda.shifts + ' &nbsp;|&nbsp; ' +
-      '<b>សរុប: ' + fmtUsd(summary.linda.usd) + ' (' + fmtKhr(summary.linda.khr) + ')</b>' +
-      '</div>';
-  }
 
   document.getElementById('payWrap').innerHTML = html;
 }
