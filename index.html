@@ -616,54 +616,60 @@ function openEditor(cell) {
   var currentVal = cell.dataset.value;
   STATE.editing = { date: date, field: field };
 
-  var suggestions = [];
   if (field === 'SPV_Off') {
-    var offFromDoctors = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
-    var offFromHistory = harvestNames(['SPV_Off']).filter(function (n) { return n !== 'DAY OFF'; });
-    suggestions = ['DAY OFF'].concat(offFromDoctors, offFromHistory);
-  } else {
-    var poolFields = ['SPV_Day1', 'SPV_Day2', 'SPV_Day3', 'SPV_Night'];
-    var fromDoctors = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
-    var fromHistory = harvestNames(poolFields);
-    suggestions = fromDoctors.concat(fromHistory);
-  }
-  var seen = {};
-  suggestions = suggestions.filter(function (s) { return s && !seen[s] && (seen[s] = true); });
+    // Free-text only — no dropdown/suggestions for this column.
+    var textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.className = 'edit-select';
+    textInput.value = currentVal || '';
+    textInput.placeholder = 'សរសេរបំពេញ...';
 
-  var listId = 'dlist_' + date.replace(/-/g, '') + '_' + field;
-  var datalist = document.createElement('datalist');
-  datalist.id = listId;
-  suggestions.forEach(function (s) {
+    cell.innerHTML = '';
+    cell.appendChild(textInput);
+    textInput.focus();
+    textInput.select();
+
+    function commitText() {
+      var newVal = textInput.value.trim();
+      STATE.editing = null;
+      if (newVal === currentVal) { renderSchedule(); return; }
+      saveCellValue(date, field, newVal);
+    }
+    textInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { textInput.blur(); }
+      if (e.key === 'Escape') { STATE.editing = null; renderSchedule(); }
+    });
+    textInput.addEventListener('blur', function () { setTimeout(commitText, 80); });
+    return;
+  }
+
+  // SPV Day1/2/3/Night — strict dropdown, only names from the Doctors list.
+  var select = document.createElement('select');
+  select.className = 'edit-select';
+  var names = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
+  var options = ['(ទទេ)'].concat(names);
+  options.forEach(function (opt) {
     var o = document.createElement('option');
-    o.value = s;
-    datalist.appendChild(o);
+    var val = (opt === '(ទទេ)') ? '' : opt;
+    o.value = val;
+    o.textContent = opt;
+    if (val === currentVal) o.selected = true;
+    select.appendChild(o);
   });
 
-  var input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'edit-select';
-  input.setAttribute('list', listId);
-  input.value = currentVal || '';
-  input.placeholder = 'វាយបញ្ចូលឈ្មោះ...';
-
   cell.innerHTML = '';
-  cell.appendChild(input);
-  cell.appendChild(datalist);
-  input.focus();
-  input.select();
+  cell.appendChild(select);
+  select.focus();
 
-  function commit() {
-    var newVal = input.value.trim();
+  function commitSelect() {
+    var newVal = select.value;
     STATE.editing = null;
     if (newVal === currentVal) { renderSchedule(); return; }
     saveCellValue(date, field, newVal);
   }
-  input.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { input.blur(); }
-    if (e.key === 'Escape') { STATE.editing = null; renderSchedule(); }
-  });
-  input.addEventListener('blur', function () {
-    setTimeout(commit, 80);
+  select.addEventListener('change', commitSelect);
+  select.addEventListener('blur', function () {
+    setTimeout(function () { if (STATE.editing) { STATE.editing = null; renderSchedule(); } }, 120);
   });
 }
 
@@ -687,11 +693,41 @@ function renderDoctors() {
   }
   grid.innerHTML = STATE.doctors.map(function (d) {
     var name = d.NameSPV;
+    var c = getNameColors(name);
+    var inputStyle = 'color:' + c.text + ';' + (c.bg ? 'background:' + c.bg + ';' : '');
     return '<div class="doc-item">' +
-      '<div class="name" style="' + styleFor(name) + (getNameColors(name).bg ? 'padding:2px 8px;border-radius:6px;display:inline-block;' : '') + '">' + escapeHtml(name) + (d.isLinda ? ' ⭐' : '') + '</div>' +
+      '<input type="text" class="edit-select" style="font-weight:700;font-size:13.5px;' + inputStyle + '" ' +
+      'value="' + escapeAttr(name) + '" data-id="' + d.ID + '" data-oldname="' + escapeAttr(name) + '" onchange="updateDoctorName(this)">' +
+      (d.isLinda ? '<span style="margin-left:6px;">⭐</span>' : '') +
       '</div>';
   }).join('');
 }
+
+function updateDoctorName(inputEl) {
+  var id = inputEl.dataset.id;
+  var oldName = inputEl.dataset.oldname;
+  var newName = inputEl.value.trim();
+  if (!newName) { showToast('ឈ្មោះមិនអាចទទេបានទេ'); renderDoctors(); return; }
+  if (newName === oldName) return;
+
+  var doc = STATE.doctors.filter(function (d) { return d.ID === id; })[0];
+  if (!doc) return;
+  doc.NameSPV = newName;
+
+  // Keep past/future schedule entries in sync with the renamed doctor.
+  STATE.scheduleAll.forEach(function (row) {
+    ['SPV_Day1', 'SPV_Day2', 'SPV_Day3', 'SPV_Night'].forEach(function (f) {
+      if (row[f] === oldName) row[f] = newName;
+    });
+  });
+
+  persistRemoteState();
+  renderDoctors();
+  renderSchedule();
+  showToast('កែឈ្មោះរួចរាល់ ✓');
+  scheduleBackup();
+}
+window.updateDoctorName = updateDoctorName;
 
 function bindDoctorForm() {
   document.getElementById('addDocForm').addEventListener('submit', function (e) {
