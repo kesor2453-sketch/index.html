@@ -237,15 +237,21 @@ import {
 /* ============================================================
    CONFIG
    ============================================================ */
+/* ============================================================
+   CONFIG — paste your NEW Firebase project's config here
+   (Firebase Console → Project Settings → Your apps → </> Web app)
+   ============================================================ */
 var firebaseConfig = {
-  apiKey: "AIzaSyDzNtFQ4Z5gYh56t1Btwy4Dltni16C-RfI",
-  authDomain: "schedual-57c23.firebaseapp.com",
-  projectId: "schedual-57c23",
-  storageBucket: "schedual-57c23.firebasestorage.app",
-  messagingSenderId: "1021432251619",
-  appId: "1:1021432251619:web:d46f2b866e897fdc07b1d6"
+  apiKey: "AIzaSyBgGZVOh-dl3RphAhLCdkta_KWxZcT20aU",
+  authDomain: "spv-schedule.firebaseapp.com",
+  projectId: "spv-schedule",
+  storageBucket: "spv-schedule.firebasestorage.app",
+  messagingSenderId: "959707281743",
+  appId: "1:959707281743:web:35cc99c80b4903defa2d3a"
 };
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwfwtCf5YYNwFDrYao-s5uX39dm3YDjWAgHmLyBop_ONBNE-QjyhhzvyLYltIH3f4dhKw/exec';
+// Optional — only needed if you also want this site to backup to a Google
+// Sheet via Apps Script. Leave as-is (or blank) to skip that entirely.
+var APPS_SCRIPT_URL = '';
 
 var fbApp = initializeApp(firebaseConfig);
 var db = initializeFirestore(fbApp, { localCache: persistentLocalCache() });
@@ -297,6 +303,12 @@ document.addEventListener('DOMContentLoaded', function () {
   bindMonthNav();
   bindDoctorForm();
   bindManualBackup();
+
+  if (firebaseConfig.apiKey.indexOf('PASTE_YOUR') === 0) {
+    document.getElementById('scheduleWrap').innerHTML =
+      '<div class="empty-state">⚠ សូមដាក់ Firebase config ថ្មីរបស់អ្នកនៅដើម script (firebaseConfig) មុននឹងប្រើគេហទំព័រនេះ</div>';
+    return;
+  }
 
   document.getElementById('scheduleWrap').innerHTML =
     '<div class="loading"><span class="spinner"></span> កំពុងភ្ជាប់ Firestore...</div>';
