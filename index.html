@@ -643,34 +643,47 @@ function openEditor(cell) {
     return;
   }
 
-  // SPV Day1/2/3/Night — strict dropdown, only names from the Doctors list.
-  var select = document.createElement('select');
-  select.className = 'edit-select';
-  var names = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
-  var options = ['(ទទេ)'].concat(names);
-  options.forEach(function (opt) {
+  // SPV Day1/2/3/Night — free text with suggestions (type to search, or type a new name).
+  var poolFields = ['SPV_Day1', 'SPV_Day2', 'SPV_Day3', 'SPV_Night'];
+  var fromDoctors = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
+  var fromHistory = harvestNames(poolFields);
+  var suggestions = fromDoctors.concat(fromHistory);
+  var seen = {};
+  suggestions = suggestions.filter(function (s) { return s && !seen[s] && (seen[s] = true); });
+
+  var listId = 'dlist_' + date.replace(/-/g, '') + '_' + field;
+  var datalist = document.createElement('datalist');
+  datalist.id = listId;
+  suggestions.forEach(function (s) {
     var o = document.createElement('option');
-    var val = (opt === '(ទទេ)') ? '' : opt;
-    o.value = val;
-    o.textContent = opt;
-    if (val === currentVal) o.selected = true;
-    select.appendChild(o);
+    o.value = s;
+    datalist.appendChild(o);
   });
 
-  cell.innerHTML = '';
-  cell.appendChild(select);
-  select.focus();
+  var nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'edit-select';
+  nameInput.setAttribute('list', listId);
+  nameInput.value = currentVal || '';
+  nameInput.placeholder = 'វាយបញ្ចូលឈ្មោះ...';
 
-  function commitSelect() {
-    var newVal = select.value;
+  cell.innerHTML = '';
+  cell.appendChild(nameInput);
+  cell.appendChild(datalist);
+  nameInput.focus();
+  nameInput.select();
+
+  function commitName() {
+    var newVal = nameInput.value.trim();
     STATE.editing = null;
     if (newVal === currentVal) { renderSchedule(); return; }
     saveCellValue(date, field, newVal);
   }
-  select.addEventListener('change', commitSelect);
-  select.addEventListener('blur', function () {
-    setTimeout(function () { if (STATE.editing) { STATE.editing = null; renderSchedule(); } }, 120);
+  nameInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { nameInput.blur(); }
+    if (e.key === 'Escape') { STATE.editing = null; renderSchedule(); }
   });
+  nameInput.addEventListener('blur', function () { setTimeout(commitName, 80); });
 }
 
 function saveCellValue(date, field, value) {
@@ -698,7 +711,6 @@ function renderDoctors() {
     return '<div class="doc-item">' +
       '<input type="text" class="edit-select" style="font-weight:700;font-size:13.5px;' + inputStyle + '" ' +
       'value="' + escapeAttr(name) + '" data-id="' + d.ID + '" data-oldname="' + escapeAttr(name) + '" onchange="updateDoctorName(this)">' +
-      (d.isLinda ? '<span style="margin-left:6px;">⭐</span>' : '') +
       '</div>';
   }).join('');
 }
@@ -759,19 +771,15 @@ function computePayrollClient(year, month) {
       var doc = findDoctorByNameClient(name);
       var key = doc ? doc.ID : name;
       var displayName = doc ? doc.NameSPV : name;
-      if (!spvCounts[key]) spvCounts[key] = { name: displayName, dayShifts: 0, nightShifts: 0, shifts: 0, usd: 0 };
+      if (!spvCounts[key]) spvCounts[key] = { name: displayName, dayShifts: 0, nightShifts: 0, shifts: 0 };
       var isNight = (f === 'SPV_Night');
       if (isNight) spvCounts[key].nightShifts++; else spvCounts[key].dayShifts++;
       spvCounts[key].shifts++;
-      spvCounts[key].usd += STATE.rates[f] || 0;
     });
   });
 
-  var list = Object.keys(spvCounts).map(function (k) {
-    var c = spvCounts[k];
-    c.khr = c.usd * STATE.khrPerUsd;
-    return c;
-  }).sort(function (a, b) { return b.usd - a.usd; });
+  var list = Object.keys(spvCounts).map(function (k) { return spvCounts[k]; })
+    .sort(function (a, b) { return b.shifts - a.shifts; });
 
   return { spv: list };
 }
@@ -784,9 +792,6 @@ function loadPayroll() {
   refreshMonthPickers();
 }
 
-function fmtUsd(n) { return '$' + (n || 0).toLocaleString(); }
-function fmtKhr(n) { return (n || 0).toLocaleString() + '៛'; }
-
 function renderPayroll(summary) {
   if (!summary) { document.getElementById('payWrap').innerHTML = '<div class="empty-state">មិនមានទិន្នន័យទេ</div>'; return; }
 
@@ -794,12 +799,11 @@ function renderPayroll(summary) {
     if (!list.length) return '<div class="empty-state" style="padding:14px 0;">មិនមានវេនទេ</div>';
     var rows = list.map(function (c) {
       return '<tr><td>' + escapeHtml(c.name) + '</td>' +
-        '<td class="num">' + c.dayShifts + '</td><td class="num">' + c.nightShifts + '</td><td class="num">' + c.shifts + '</td>' +
-        '<td class="num">' + fmtUsd(c.usd) + '</td><td class="num">' + fmtKhr(c.khr) + '</td></tr>';
+        '<td class="num">' + c.dayShifts + '</td><td class="num">' + c.nightShifts + '</td><td class="num">' + c.shifts + '</td></tr>';
     }).join('');
     return '<table class="pay"><thead><tr><th>ឈ្មោះ</th>' +
       '<th style="text-align:right;">ព្រឹក</th><th style="text-align:right;">យប់</th><th style="text-align:right;">សរុប</th>' +
-      '<th style="text-align:right;">USD</th><th style="text-align:right;">KHR</th></tr></thead><tbody>' + rows + '</tbody></table>';
+      '</tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
   var html = '<div class="pay-grid"><div class="pay-col"><h3 class="spv">SPV</h3>' + table(summary.spv) + '</div></div>';
