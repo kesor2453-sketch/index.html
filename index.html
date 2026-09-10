@@ -257,9 +257,18 @@ var scheduleDocRef = doc(db, 'scheduleApp', 'main');
 var RATES = { SPV_Day1: 25, SPV_Day2: 25, SPV_Day3: 25, SPV_Night: 25 };
 var KHR_PER_USD = 4000;
 
+var DEFAULT_COLUMNS = [
+  { id: 'SPV_Day1', label: 'SPV ១', type: 'name' },
+  { id: 'SPV_Day2', label: 'SPV ២', type: 'name' },
+  { id: 'SPV_Day3', label: 'SPV ៣', type: 'name' },
+  { id: 'SPV_Night', label: 'SPV យប់', type: 'name' },
+  { id: 'SPV_Off', label: 'ផ្សេងៗ', type: 'text' }
+];
+
 var STATE = {
   doctors: [],
   scheduleAll: [],
+  columns: DEFAULT_COLUMNS,
   rates: RATES,
   khrPerUsd: KHR_PER_USD,
   year: new Date().getFullYear(),
@@ -271,7 +280,6 @@ var STATE = {
 
 var MONTH_NAMES_KM = ['មករា','កុម្ភៈ','មីនា','មេសា','ឧសភា','មិថុនា','កក្កដា','សីហា','កញ្ញា','តុលា','វិច្ឆិកា','ធ្នូ'];
 var DOW_KM = {'Sunday':'អាទិត្យ','Monday':'ចន្ទ','Tuesday':'អង្គារ','Wednesday':'ពុធ','Thursday':'ព្រហ','Friday':'សុក្រ','Saturday':'សៅរ៍'};
-var SLOT_LABELS = {SPV_Day1:'SPV ១',SPV_Day2:'SPV ២',SPV_Day3:'SPV ៣',SPV_Night:'SPV យប់'};
 
 function seedDefaultDoctors() {
   return [
@@ -287,7 +295,7 @@ function seedDefaultDoctors() {
 
 function persistRemoteState() {
   setDoc(scheduleDocRef, {
-    doctors: STATE.doctors, scheduleAll: STATE.scheduleAll
+    doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columns: STATE.columns
   }).catch(function (err) {
     showToast('⚠ មិនអាចផ្ញើទៅ Firestore បានទេ៖ ' + err.message);
   });
@@ -315,8 +323,10 @@ document.addEventListener('DOMContentLoaded', function () {
       var data = snap.data();
       STATE.doctors = data.doctors || [];
       STATE.scheduleAll = data.scheduleAll || [];
+      STATE.columns = (data.columns && data.columns.length) ? data.columns : DEFAULT_COLUMNS;
     } else if (!firstSnapshotHandled) {
       STATE.doctors = seedDefaultDoctors();
+      STATE.columns = DEFAULT_COLUMNS;
       persistRemoteState();
     }
     firstSnapshotHandled = true;
@@ -487,7 +497,11 @@ function lindaDoctor() {
 
 function rowIsAutoOff(rowObj) {
   if (!rowObj) return true;
-  return !rowObj.SPV_Day1 && !rowObj.SPV_Day2 && !rowObj.SPV_Day3 && !rowObj.SPV_Night;
+  return STATE.columns.filter(function (c) { return c.type === 'name'; }).every(function (c) { return !rowObj[c.id]; });
+}
+
+function columnById(id) {
+  return STATE.columns.filter(function (c) { return c.id === id; })[0] || null;
 }
 
 function renderSchedule() {
@@ -498,10 +512,17 @@ function renderSchedule() {
 
   document.getElementById('monthLabel').textContent = MONTH_NAMES_KM[m - 1] + ' ' + y;
 
+  var headerCells = STATE.columns.map(function (c) {
+    return '<th class="group-spv" style="padding:2px;">' +
+      '<input type="text" class="edit-select col-label-input" value="' + escapeAttr(c.label) +
+      '" data-colid="' + c.id + '" onchange="renameColumn(this)" style="text-align:center;font-weight:600;">' +
+      '<span class="col-del" title="លុបជួរឈរនេះ" onclick="deleteColumn(\'' + c.id + '\')">×</span>' +
+      '</th>';
+  }).join('');
+
   var html = '<div style="overflow-x:auto;"><table class="sched"><thead><tr>' +
-    '<th style="text-align:left;">កាលបរិច្ឆេទ</th>' +
-    '<th class="group-spv">SPV ១</th><th class="group-spv">SPV ២</th><th class="group-spv">SPV ៣</th>' +
-    '<th class="group-spv">SPV យប់</th><th class="group-spv">ផ្សេងៗ</th>' +
+    '<th style="text-align:left;">កាលបរិច្ឆេទ</th>' + headerCells +
+    '<th style="width:36px;"><span class="col-add" title="បន្ថែមជួរឈរ" onclick="addColumn()">+</span></th>' +
     '</tr></thead><tbody>';
 
   for (var d = 1; d <= nDays; d++) {
@@ -523,10 +544,10 @@ function renderSchedule() {
       (isAutoOff ? '<span class="auto-off-badge">🚫 ថ្ងៃឈប់</span>' : '') +
       '</span></td>';
 
-    ['SPV_Day1', 'SPV_Day2', 'SPV_Day3', 'SPV_Night'].forEach(function (f) {
-      html += renderSlotCell(dateStr, f, row[f]);
+    STATE.columns.forEach(function (c) {
+      html += (c.type === 'text') ? renderOffCell(dateStr, c.id, row[c.id]) : renderSlotCell(dateStr, c.id, row[c.id]);
     });
-    html += renderOffCell(dateStr, row['SPV_Off']);
+    html += '<td></td>';
     html += '</tr>';
   }
   html += '</tbody></table></div>';
@@ -534,6 +555,41 @@ function renderSchedule() {
 
   bindCellClicks();
 }
+
+function renameColumn(inputEl) {
+  var id = inputEl.dataset.colid;
+  var newLabel = inputEl.value.trim();
+  var col = columnById(id);
+  if (!col) return;
+  if (!newLabel) { inputEl.value = col.label; return; }
+  col.label = newLabel;
+  persistRemoteState();
+  showToast('ប្តូរឈ្មោះជួរឈររួចរាល់ ✓');
+}
+window.renameColumn = renameColumn;
+
+function addColumn() {
+  var label = window.prompt('ឈ្មោះជួរឈរថ្មី៖', 'SPV ' + (STATE.columns.filter(function (c) { return c.type === 'name'; }).length + 1));
+  if (!label) return;
+  var id = 'col_' + Date.now();
+  STATE.columns.push({ id: id, label: label, type: 'name' });
+  persistRemoteState();
+  renderSchedule();
+  showToast('បន្ថែមជួរឈររួចរាល់ ✓');
+}
+window.addColumn = addColumn;
+
+function deleteColumn(id) {
+  if (STATE.columns.length <= 1) { showToast('ត្រូវមានយ៉ាងហោចណាស់ ១ជួរឈរ'); return; }
+  var col = columnById(id);
+  if (!col) return;
+  if (!window.confirm('លុបជួរឈរ "' + col.label + '"? (ទិន្នន័យចាស់ក្នុងជួរនេះនឹងលាក់ ប៉ុន្តែមិនលុបចេញពី Firestore ទេ)')) return;
+  STATE.columns = STATE.columns.filter(function (c) { return c.id !== id; });
+  persistRemoteState();
+  renderSchedule();
+  showToast('លុបជួរឈររួចរាល់ ✓');
+}
+window.deleteColumn = deleteColumn;
 
 var MANUAL_DOCTOR_COLORS = {
   S1: { bg: '#5B9BD5', text: '#ffffff' },
@@ -578,12 +634,12 @@ function renderSlotCell(dateStr, field, value) {
     display + '</div></td>';
 }
 
-function renderOffCell(dateStr, value) {
+function renderOffCell(dateStr, field, value) {
   var display = value ? escapeHtml(value) : '—';
   var isCustomName = value && value !== 'DAY OFF';
   var style = isCustomName ? ' style="' + styleFor(value) + '"' : '';
   return '<td><div class="cell-slot ' + (value ? 'off' : 'empty') +
-    '"' + style + ' data-date="' + dateStr + '" data-field="SPV_Off" data-value="' + escapeAttr(value || '') + '">' +
+    '"' + style + ' data-date="' + dateStr + '" data-field="' + field + '" data-value="' + escapeAttr(value || '') + '">' +
     display + '</div></td>';
 }
 
@@ -613,7 +669,8 @@ function openEditor(cell) {
   var currentVal = cell.dataset.value;
   STATE.editing = { date: date, field: field };
 
-  if (field === 'SPV_Off') {
+  var col = columnById(field);
+  if (col && col.type === 'text') {
     // Free-text only — no dropdown/suggestions for this column.
     var textInput = document.createElement('input');
     textInput.type = 'text';
@@ -640,8 +697,8 @@ function openEditor(cell) {
     return;
   }
 
-  // SPV Day1/2/3/Night — free text with suggestions (type to search, or type a new name).
-  var poolFields = ['SPV_Day1', 'SPV_Day2', 'SPV_Day3', 'SPV_Night'];
+  // Name-type columns — free text with suggestions (type to search, or type a new name).
+  var poolFields = STATE.columns.filter(function (c) { return c.type === 'name'; }).map(function (c) { return c.id; });
   var fromDoctors = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
   var fromHistory = harvestNames(poolFields);
   var suggestions = fromDoctors.concat(fromHistory);
@@ -760,16 +817,17 @@ function computePayrollClient(year, month) {
   var prefix = year + '-' + pad2(month);
   var rows = STATE.scheduleAll.filter(function (r) { return String(r.Date).indexOf(prefix) === 0; });
   var spvCounts = {};
+  var nameFieldIds = STATE.columns.filter(function (c) { return c.type === 'name'; }).map(function (c) { return c.id; });
 
   rows.forEach(function (r) {
-    ['SPV_Day1', 'SPV_Day2', 'SPV_Day3', 'SPV_Night'].forEach(function (f) {
+    nameFieldIds.forEach(function (f) {
       var name = r[f];
       if (!name) return;
       var doc = findDoctorByNameClient(name);
       var key = doc ? doc.ID : name;
       var displayName = doc ? doc.NameSPV : name;
       if (!spvCounts[key]) spvCounts[key] = { name: displayName, dayShifts: 0, nightShifts: 0, shifts: 0 };
-      var isNight = (f === 'SPV_Night');
+      var isNight = (f === 'SPV_Night'); // "night" classification stays tied to this original column id
       if (isNight) spvCounts[key].nightShifts++; else spvCounts[key].dayShifts++;
       spvCounts[key].shifts++;
     });
