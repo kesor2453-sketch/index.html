@@ -82,7 +82,8 @@
   }
   table.sched tbody tr:hover{background:#fafbfd;}
   table.sched tbody tr.weekend td.date-cell{color:var(--off);}
-  table.sched tbody tr.today{background:#fff8e9;}
+  table.sched tbody tr.today{background:#fff3b0;}
+  table.sched tbody tr.today td.date-cell{box-shadow:inset 3px 0 0 var(--warn); font-weight:800;}
   table.sched tbody tr.auto-off{background:#fdf4f4;}
   td.date-cell{font-weight:700;white-space:nowrap;text-align:left;padding-left:10px !important;}
   td.date-cell .dow{display:block;font-weight:500;color:var(--sub);font-size:10.8px;}
@@ -536,7 +537,7 @@ function renderSchedule() {
 
 var MANUAL_DOCTOR_COLORS = {
   S1: { bg: '#5B9BD5', text: '#ffffff' },
-  S2: { bg: '#FFFFFF', text: '#333333' },
+  S2: { bg: '#8E44AD', text: '#ffffff' }, // Dr.Khean Daline — purple
   S3: { bg: '#F4B6B6', text: '#7a1f1f' },
   S4: { bg: '#E8B285', text: '#5c3a1e' },
   S5: { bg: '#F5D97A', text: '#6b5900' },
