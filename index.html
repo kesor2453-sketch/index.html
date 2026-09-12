@@ -194,7 +194,11 @@
   <!-- DOCTORS -->
   <div class="panel" id="panel-doctors">
     <div class="card">
-      <div style="font-weight:700;font-size:15px;margin-bottom:10px;">បញ្ជីគ្រូពេទ្យ</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="font-weight:700;font-size:15px;">បញ្ជីគ្រូពេទ្យ</div>
+        <button type="button" id="doctorEditToggle" onclick="toggleDoctorEditMode()"
+          style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 14px;font-size:12.5px;cursor:pointer;color:var(--brand);font-weight:600;">✎ កែឈ្មោះទាំងអស់</button>
+      </div>
       <div class="doc-grid" id="docGrid"></div>
       <form class="add-doc" id="addDocForm">
         <input type="text" id="newName" placeholder="ឈ្មោះ — ឧ. Dr.Sok Dara">
@@ -504,6 +508,9 @@ function columnById(id) {
   return STATE.columns.filter(function (c) { return c.id === id; })[0] || null;
 }
 
+var headerEditMode = false;
+var dragColId = null;
+
 function renderSchedule() {
   var y = STATE.year, m = STATE.month;
   var nDays = daysInMonth(y, m);
@@ -513,16 +520,22 @@ function renderSchedule() {
   document.getElementById('monthLabel').textContent = MONTH_NAMES_KM[m - 1] + ' ' + y;
 
   var headerCells = STATE.columns.map(function (c) {
-    return '<th class="group-spv" style="padding:2px;">' +
-      '<input type="text" class="edit-select col-label-input" value="' + escapeAttr(c.label) +
-      '" data-colid="' + c.id + '" onchange="renameColumn(this)" style="text-align:center;font-weight:600;">' +
-      '<span class="col-del" title="លុបជួរឈរនេះ" onclick="deleteColumn(\'' + c.id + '\')">×</span>' +
-      '</th>';
+    var inner = headerEditMode
+      ? '<input type="text" class="edit-select col-label-input" value="' + escapeAttr(c.label) +
+        '" data-colid="' + c.id + '" onchange="renameColumn(this)" style="text-align:center;font-weight:600;">' +
+        '<span class="col-del" title="លុបជួរឈរនេះ" onclick="deleteColumn(\'' + c.id + '\')">×</span>'
+      : escapeHtml(c.label);
+    return '<th class="group-spv" style="padding:2px;cursor:move;" draggable="true" ' +
+      'ondragstart="onColDragStart(event,\'' + c.id + '\')" ondragover="onColDragOver(event)" ondrop="onColDrop(event,\'' + c.id + '\')">' +
+      inner + '</th>';
   }).join('');
 
   var html = '<div style="overflow-x:auto;"><table class="sched"><thead><tr>' +
     '<th style="text-align:left;">កាលបរិច្ឆេទ</th>' + headerCells +
-    '<th style="width:36px;"><span class="col-add" title="បន្ថែមជួរឈរ" onclick="addColumn()">+</span></th>' +
+    '<th style="width:60px;white-space:nowrap;">' +
+    '<span class="col-add" title="បន្ថែមជួរឈរ" onclick="addColumn()">+</span> ' +
+    '<span class="col-add" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ" onclick="toggleHeaderEditMode()">✎</span>' +
+    '</th>' +
     '</tr></thead><tbody>';
 
   for (var d = 1; d <= nDays; d++) {
@@ -555,6 +568,38 @@ function renderSchedule() {
 
   bindCellClicks();
 }
+
+function onColDragStart(e, id) {
+  dragColId = id;
+  e.dataTransfer.effectAllowed = 'move';
+}
+window.onColDragStart = onColDragStart;
+
+function onColDragOver(e) {
+  e.preventDefault();
+}
+window.onColDragOver = onColDragOver;
+
+function onColDrop(e, targetId) {
+  e.preventDefault();
+  if (!dragColId || dragColId === targetId) { dragColId = null; return; }
+  var fromIdx = STATE.columns.findIndex(function (c) { return c.id === dragColId; });
+  var toIdx = STATE.columns.findIndex(function (c) { return c.id === targetId; });
+  dragColId = null;
+  if (fromIdx === -1 || toIdx === -1) return;
+  var moved = STATE.columns.splice(fromIdx, 1)[0];
+  STATE.columns.splice(toIdx, 0, moved);
+  persistRemoteState();
+  renderSchedule();
+  showToast('ប្តូរលំដាប់ជួរឈររួចរាល់ ✓');
+}
+window.onColDrop = onColDrop;
+
+function toggleHeaderEditMode() {
+  headerEditMode = !headerEditMode;
+  renderSchedule();
+}
+window.toggleHeaderEditMode = toggleHeaderEditMode;
 
 function renameColumn(inputEl) {
   var id = inputEl.dataset.colid;
@@ -697,34 +742,47 @@ function openEditor(cell) {
     return;
   }
 
-  // Name-type columns — strict dropdown, only names from the Doctors list.
-  var select = document.createElement('select');
-  select.className = 'edit-select';
-  var names = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
-  var options = ['(ទទេ)'].concat(names);
-  options.forEach(function (opt) {
+  // Name-type columns — free text with suggestions (type to search, or type a new name).
+  var poolFields = STATE.columns.filter(function (c) { return c.type === 'name'; }).map(function (c) { return c.id; });
+  var fromDoctors = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
+  var fromHistory = harvestNames(poolFields);
+  var suggestions = fromDoctors.concat(fromHistory);
+  var seen = {};
+  suggestions = suggestions.filter(function (s) { return s && !seen[s] && (seen[s] = true); });
+
+  var listId = 'dlist_' + date.replace(/-/g, '') + '_' + field;
+  var datalist = document.createElement('datalist');
+  datalist.id = listId;
+  suggestions.forEach(function (s) {
     var o = document.createElement('option');
-    var val = (opt === '(ទទេ)') ? '' : opt;
-    o.value = val;
-    o.textContent = opt;
-    if (val === currentVal) o.selected = true;
-    select.appendChild(o);
+    o.value = s;
+    datalist.appendChild(o);
   });
 
-  cell.innerHTML = '';
-  cell.appendChild(select);
-  select.focus();
+  var nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'edit-select';
+  nameInput.setAttribute('list', listId);
+  nameInput.value = currentVal || '';
+  nameInput.placeholder = 'វាយបញ្ចូលឈ្មោះ...';
 
-  function commitSelect() {
-    var newVal = select.value;
+  cell.innerHTML = '';
+  cell.appendChild(nameInput);
+  cell.appendChild(datalist);
+  nameInput.focus();
+  nameInput.select();
+
+  function commitName() {
+    var newVal = nameInput.value.trim();
     STATE.editing = null;
     if (newVal === currentVal) { renderSchedule(); return; }
     saveCellValue(date, field, newVal);
   }
-  select.addEventListener('change', commitSelect);
-  select.addEventListener('blur', function () {
-    setTimeout(function () { if (STATE.editing) { STATE.editing = null; renderSchedule(); } }, 120);
+  nameInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { nameInput.blur(); }
+    if (e.key === 'Escape') { STATE.editing = null; renderSchedule(); }
   });
+  nameInput.addEventListener('blur', function () { setTimeout(commitName, 80); });
 }
 
 function saveCellValue(date, field, value) {
@@ -739,68 +797,64 @@ function saveCellValue(date, field, value) {
   scheduleBackup();
 }
 
+var doctorEditMode = false;
+
 function renderDoctors() {
   var grid = document.getElementById('docGrid');
+  var toggleBtn = document.getElementById('doctorEditToggle');
+  if (toggleBtn) toggleBtn.textContent = doctorEditMode ? '💾 រក្សាទុកទាំងអស់' : '✎ កែឈ្មោះទាំងអស់';
+
   if (!STATE.doctors.length) {
     grid.innerHTML = '<div class="empty-state">មិនទាន់មានទិន្នន័យគ្រូពេទ្យទេ</div>';
     return;
   }
   grid.innerHTML = STATE.doctors.map(function (d) {
     var name = d.NameSPV;
+    if (doctorEditMode) {
+      return '<div class="doc-item">' +
+        '<input type="text" class="edit-select doc-name-input" style="width:100%;" ' +
+        'value="' + escapeAttr(name) + '" data-id="' + d.ID + '" data-oldname="' + escapeAttr(name) + '">' +
+        '</div>';
+    }
     var c = getNameColors(name);
     var badgeStyle = 'color:' + c.text + ';' + (c.bg ? 'background:' + c.bg + ';padding:2px 8px;border-radius:6px;' : '');
-    return '<div class="doc-item" id="docItem_' + d.ID + '" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+    return '<div class="doc-item">' +
       '<span class="name" style="font-weight:700;font-size:13.5px;' + badgeStyle + '">' + escapeHtml(name) + '</span>' +
-      '<button type="button" style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:4px 10px;font-size:11.5px;cursor:pointer;color:var(--sub);white-space:nowrap;" onclick="startEditDoctorName(\'' + d.ID + '\')">✎ កែឈ្មោះ</button>' +
       '</div>';
   }).join('');
 }
 
-function startEditDoctorName(id) {
-  var doc = STATE.doctors.filter(function (d) { return d.ID === id; })[0];
-  if (!doc) return;
-  var item = document.getElementById('docItem_' + id);
-  if (!item) return;
-  var oldName = doc.NameSPV;
-
-  item.innerHTML =
-    '<input type="text" class="edit-select" style="flex:1;" value="' + escapeAttr(oldName) + '" id="docNameInput_' + id + '">' +
-    '<button type="button" style="border:none;background:var(--brand);color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;" onclick="commitDoctorName(\'' + id + '\',\'' + escapeAttr(oldName).replace(/'/g, "\\'") + '\')">រក្សាទុក</button>';
-
-  var input = document.getElementById('docNameInput_' + id);
-  input.focus();
-  input.select();
-  input.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { commitDoctorName(id, oldName); }
-    if (e.key === 'Escape') { renderDoctors(); }
-  });
-}
-window.startEditDoctorName = startEditDoctorName;
-
-function commitDoctorName(id, oldName) {
-  var input = document.getElementById('docNameInput_' + id);
-  var newName = input ? input.value.trim() : '';
-  if (!newName) { showToast('ឈ្មោះមិនអាចទទេបានទេ'); renderDoctors(); return; }
-  if (newName === oldName) { renderDoctors(); return; }
-
-  var doc = STATE.doctors.filter(function (d) { return d.ID === id; })[0];
-  if (!doc) return;
-  doc.NameSPV = newName;
-
-  // Keep past/future schedule entries in sync with the renamed doctor.
-  STATE.scheduleAll.forEach(function (row) {
-    STATE.columns.filter(function (c) { return c.type === 'name'; }).forEach(function (c) {
-      if (row[c.id] === oldName) row[c.id] = newName;
+function toggleDoctorEditMode() {
+  if (doctorEditMode) {
+    // Currently in edit mode — this click means "save all".
+    var changedCount = 0;
+    document.querySelectorAll('.doc-name-input').forEach(function (inp) {
+      var id = inp.dataset.id;
+      var oldName = inp.dataset.oldname;
+      var newName = inp.value.trim();
+      if (!newName || newName === oldName) return;
+      var doc = STATE.doctors.filter(function (d) { return d.ID === id; })[0];
+      if (!doc) return;
+      doc.NameSPV = newName;
+      changedCount++;
+      // Keep past/future schedule entries in sync with the renamed doctor.
+      STATE.scheduleAll.forEach(function (row) {
+        STATE.columns.filter(function (c) { return c.type === 'name'; }).forEach(function (c) {
+          if (row[c.id] === oldName) row[c.id] = newName;
+        });
+      });
     });
-  });
-
-  persistRemoteState();
+    if (changedCount > 0) {
+      persistRemoteState();
+      renderSchedule();
+      showToast('រក្សាទុកឈ្មោះទាំងអស់រួចរាល់ ✓ (' + changedCount + ')');
+      scheduleBackup();
+    }
+  }
+  doctorEditMode = !doctorEditMode;
   renderDoctors();
-  renderSchedule();
-  showToast('កែឈ្មោះរួចរាល់ ✓');
-  scheduleBackup();
 }
-window.commitDoctorName = commitDoctorName;
+window.toggleDoctorEditMode = toggleDoctorEditMode;
 
 function bindDoctorForm() {
   document.getElementById('addDocForm').addEventListener('submit', function (e) {
