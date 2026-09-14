@@ -77,6 +77,22 @@
     white-space:nowrap;
   }
   table.sched thead th.group-spv{color:var(--spv);}
+  .col-del{
+    display:inline-block;color:var(--off);font-weight:700;font-size:14px;cursor:pointer;
+    margin-left:4px;padding:0 3px;border-radius:4px;
+  }
+  .col-del:hover{background:var(--off-bg);}
+  .col-add{
+    display:inline-block;cursor:pointer;font-size:14px;font-weight:700;color:var(--brand);
+    padding:2px 6px;border-radius:6px;
+  }
+  .col-add:hover{background:var(--spv-bg);}
+  .col-move{
+    display:inline-block;cursor:pointer;font-size:11px;color:var(--sub);
+    padding:1px 3px;border-radius:4px;flex-shrink:0;
+  }
+  .col-move:hover{background:var(--line);color:var(--ink);}
+  .col-label-input{max-width:90px;}
   table.sched tbody td{
     padding:6px 4px;border-bottom:1px solid var(--line);text-align:center;vertical-align:middle;
   }
@@ -272,7 +288,7 @@ var DEFAULT_COLUMNS = [
 var STATE = {
   doctors: [],
   scheduleAll: [],
-  columns: DEFAULT_COLUMNS,
+  columnsByMonth: {}, // { 'YYYY-MM': [ {id,label,type}, ... ] } — each month keeps its own column set
   rates: RATES,
   khrPerUsd: KHR_PER_USD,
   year: new Date().getFullYear(),
@@ -281,6 +297,19 @@ var STATE = {
   payMonth: null,
   editing: null
 };
+
+// Returns (and lazily creates) the column list for a given "YYYY-MM" key.
+// Brand-new months start from a copy of DEFAULT_COLUMNS but are independent
+// from then on — editing/adding/removing columns in one month never touches
+// any other month.
+function getColumnsForMonth(ym) {
+  if (!STATE.columnsByMonth[ym] || !STATE.columnsByMonth[ym].length) {
+    STATE.columnsByMonth[ym] = JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+  }
+  return STATE.columnsByMonth[ym];
+}
+function monthKey(y, m) { return y + '-' + pad2(m); }
+function currentScheduleMonthKey() { return monthKey(STATE.year, STATE.month); }
 
 var MONTH_NAMES_KM = ['មករា','កុម្ភៈ','មីនា','មេសា','ឧសភា','មិថុនា','កក្កដា','សីហា','កញ្ញា','តុលា','វិច្ឆិកា','ធ្នូ'];
 var DOW_KM = {'Sunday':'អាទិត្យ','Monday':'ចន្ទ','Tuesday':'អង្គារ','Wednesday':'ពុធ','Thursday':'ព្រហ','Friday':'សុក្រ','Saturday':'សៅរ៍'};
@@ -299,7 +328,7 @@ function seedDefaultDoctors() {
 
 function persistRemoteState() {
   setDoc(scheduleDocRef, {
-    doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columns: STATE.columns
+    doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columnsByMonth: STATE.columnsByMonth
   }).catch(function (err) {
     showToast('⚠ មិនអាចផ្ញើទៅ Firestore បានទេ៖ ' + err.message);
   });
@@ -327,10 +356,10 @@ document.addEventListener('DOMContentLoaded', function () {
       var data = snap.data();
       STATE.doctors = data.doctors || [];
       STATE.scheduleAll = data.scheduleAll || [];
-      STATE.columns = (data.columns && data.columns.length) ? data.columns : DEFAULT_COLUMNS;
+      STATE.columnsByMonth = data.columnsByMonth || {};
     } else if (!firstSnapshotHandled) {
       STATE.doctors = seedDefaultDoctors();
-      STATE.columns = DEFAULT_COLUMNS;
+      STATE.columnsByMonth = {};
       persistRemoteState();
     }
     firstSnapshotHandled = true;
@@ -499,13 +528,15 @@ function lindaDoctor() {
   return STATE.doctors.filter(function (d) { return d.isLinda; })[0] || null;
 }
 
-function rowIsAutoOff(rowObj) {
+function rowIsAutoOff(rowObj, cols) {
   if (!rowObj) return true;
-  return STATE.columns.filter(function (c) { return c.type === 'name'; }).every(function (c) { return !rowObj[c.id]; });
+  cols = cols || getColumnsForMonth(currentScheduleMonthKey());
+  return cols.filter(function (c) { return c.type === 'name'; }).every(function (c) { return !rowObj[c.id]; });
 }
 
 function columnById(id) {
-  return STATE.columns.filter(function (c) { return c.id === id; })[0] || null;
+  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  return cols.filter(function (c) { return c.id === id; })[0] || null;
 }
 
 var headerEditMode = false;
@@ -516,15 +547,27 @@ function renderSchedule() {
   var nDays = daysInMonth(y, m);
   var today = new Date();
   var todayStr = today.getFullYear() + '-' + pad2(today.getMonth() + 1) + '-' + pad2(today.getDate());
+  var cols = getColumnsForMonth(currentScheduleMonthKey());
 
   document.getElementById('monthLabel').textContent = MONTH_NAMES_KM[m - 1] + ' ' + y;
 
-  var headerCells = STATE.columns.map(function (c) {
-    var inner = headerEditMode
-      ? '<input type="text" class="edit-select col-label-input" value="' + escapeAttr(c.label) +
+  var headerCells = cols.map(function (c, idx) {
+    var inner;
+    if (headerEditMode) {
+      var leftArrow = idx > 0
+        ? '<span class="col-move" title="ផ្លាស់ទីទៅឆ្វេង" onclick="moveColumn(\'' + c.id + '\',-1)">◀</span>' : '';
+      var rightArrow = idx < cols.length - 1
+        ? '<span class="col-move" title="ផ្លាស់ទីទៅស្តាំ" onclick="moveColumn(\'' + c.id + '\',1)">▶</span>' : '';
+      inner = '<div style="display:flex;align-items:center;justify-content:center;gap:2px;flex-wrap:nowrap;">' +
+        leftArrow +
+        '<input type="text" class="edit-select col-label-input" value="' + escapeAttr(c.label) +
         '" data-colid="' + c.id + '" onchange="renameColumn(this)" style="text-align:center;font-weight:600;">' +
-        '<span class="col-del" title="លុបជួរឈរនេះ" onclick="deleteColumn(\'' + c.id + '\')">×</span>'
-      : escapeHtml(c.label);
+        rightArrow +
+        '<span class="col-del" title="លុបជួរឈរនេះ" onclick="deleteColumn(\'' + c.id + '\')">×</span>' +
+        '</div>';
+    } else {
+      inner = escapeHtml(c.label);
+    }
     return '<th class="group-spv" style="padding:2px;cursor:move;" draggable="true" ' +
       'ondragstart="onColDragStart(event,\'' + c.id + '\')" ondragover="onColDragOver(event)" ondrop="onColDrop(event,\'' + c.id + '\')">' +
       inner + '</th>';
@@ -544,7 +587,7 @@ function renderSchedule() {
     var dowName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow];
     var isWeekend = (dow === 0 || dow === 6);
     var row = rowForDate(dateStr) || { Date: dateStr };
-    var isAutoOff = rowIsAutoOff(row);
+    var isAutoOff = rowIsAutoOff(row, cols);
 
     var trClasses = [];
     if (isWeekend) trClasses.push('weekend');
@@ -557,7 +600,7 @@ function renderSchedule() {
       (isAutoOff ? '<span class="auto-off-badge">🚫 ថ្ងៃឈប់</span>' : '') +
       '</span></td>';
 
-    STATE.columns.forEach(function (c) {
+    cols.forEach(function (c) {
       html += (c.type === 'text') ? renderOffCell(dateStr, c.id, row[c.id]) : renderSlotCell(dateStr, c.id, row[c.id]);
     });
     html += '<td></td>';
@@ -568,6 +611,18 @@ function renderSchedule() {
 
   bindCellClicks();
 }
+
+function moveColumn(id, delta) {
+  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  var idx = cols.findIndex(function (c) { return c.id === id; });
+  var newIdx = idx + delta;
+  if (idx === -1 || newIdx < 0 || newIdx >= cols.length) return;
+  var moved = cols.splice(idx, 1)[0];
+  cols.splice(newIdx, 0, moved);
+  persistRemoteState();
+  renderSchedule();
+}
+window.moveColumn = moveColumn;
 
 function onColDragStart(e, id) {
   dragColId = id;
@@ -583,12 +638,13 @@ window.onColDragOver = onColDragOver;
 function onColDrop(e, targetId) {
   e.preventDefault();
   if (!dragColId || dragColId === targetId) { dragColId = null; return; }
-  var fromIdx = STATE.columns.findIndex(function (c) { return c.id === dragColId; });
-  var toIdx = STATE.columns.findIndex(function (c) { return c.id === targetId; });
+  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  var fromIdx = cols.findIndex(function (c) { return c.id === dragColId; });
+  var toIdx = cols.findIndex(function (c) { return c.id === targetId; });
   dragColId = null;
   if (fromIdx === -1 || toIdx === -1) return;
-  var moved = STATE.columns.splice(fromIdx, 1)[0];
-  STATE.columns.splice(toIdx, 0, moved);
+  var moved = cols.splice(fromIdx, 1)[0];
+  cols.splice(toIdx, 0, moved);
   persistRemoteState();
   renderSchedule();
   showToast('ប្តូរលំដាប់ជួរឈររួចរាល់ ✓');
@@ -614,22 +670,24 @@ function renameColumn(inputEl) {
 window.renameColumn = renameColumn;
 
 function addColumn() {
-  var label = window.prompt('ឈ្មោះជួរឈរថ្មី៖', 'SPV ' + (STATE.columns.filter(function (c) { return c.type === 'name'; }).length + 1));
+  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  var label = window.prompt('ឈ្មោះជួរឈរថ្មី៖', 'SPV ' + (cols.filter(function (c) { return c.type === 'name'; }).length + 1));
   if (!label) return;
   var id = 'col_' + Date.now();
-  STATE.columns.push({ id: id, label: label, type: 'name' });
+  cols.push({ id: id, label: label, type: 'name' });
   persistRemoteState();
   renderSchedule();
-  showToast('បន្ថែមជួរឈររួចរាល់ ✓');
+  showToast('បន្ថែមជួរឈររួចរាល់ ✓ (សម្រាប់តែខែនេះ)');
 }
 window.addColumn = addColumn;
 
 function deleteColumn(id) {
-  if (STATE.columns.length <= 1) { showToast('ត្រូវមានយ៉ាងហោចណាស់ ១ជួរឈរ'); return; }
+  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  if (cols.length <= 1) { showToast('ត្រូវមានយ៉ាងហោចណាស់ ១ជួរឈរ'); return; }
   var col = columnById(id);
   if (!col) return;
-  if (!window.confirm('លុបជួរឈរ "' + col.label + '"? (ទិន្នន័យចាស់ក្នុងជួរនេះនឹងលាក់ ប៉ុន្តែមិនលុបចេញពី Firestore ទេ)')) return;
-  STATE.columns = STATE.columns.filter(function (c) { return c.id !== id; });
+  if (!window.confirm('លុបជួរឈរ "' + col.label + '"? (ចំពោះខែនេះតែប៉ុណ្ណោះ — ទិន្នន័យចាស់ក្នុងជួរនេះនឹងលាក់ ប៉ុន្តែមិនលុបចេញពី Firestore ទេ)')) return;
+  STATE.columnsByMonth[currentScheduleMonthKey()] = cols.filter(function (c) { return c.id !== id; });
   persistRemoteState();
   renderSchedule();
   showToast('លុបជួរឈររួចរាល់ ✓');
@@ -743,7 +801,7 @@ function openEditor(cell) {
   }
 
   // Name-type columns — free text with suggestions (type to search, or type a new name).
-  var poolFields = STATE.columns.filter(function (c) { return c.type === 'name'; }).map(function (c) { return c.id; });
+  var poolFields = getColumnsForMonth(currentScheduleMonthKey()).filter(function (c) { return c.type === 'name'; }).map(function (c) { return c.id; });
   var fromDoctors = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
   var fromHistory = harvestNames(poolFields);
   var suggestions = fromDoctors.concat(fromHistory);
@@ -838,8 +896,12 @@ function toggleDoctorEditMode() {
       doc.NameSPV = newName;
       changedCount++;
       // Keep past/future schedule entries in sync with the renamed doctor.
+      // Each row may belong to a month with its own column set, so resolve
+      // per-row rather than assuming the current month's columns apply.
       STATE.scheduleAll.forEach(function (row) {
-        STATE.columns.filter(function (c) { return c.type === 'name'; }).forEach(function (c) {
+        var rowYm = String(row.Date || '').slice(0, 7);
+        if (!rowYm) return;
+        getColumnsForMonth(rowYm).filter(function (c) { return c.type === 'name'; }).forEach(function (c) {
           if (row[c.id] === oldName) row[c.id] = newName;
         });
       });
@@ -878,7 +940,7 @@ function computePayrollClient(year, month) {
   var prefix = year + '-' + pad2(month);
   var rows = STATE.scheduleAll.filter(function (r) { return String(r.Date).indexOf(prefix) === 0; });
   var spvCounts = {};
-  var nameCols = STATE.columns.filter(function (c) { return c.type === 'name'; });
+  var nameCols = getColumnsForMonth(monthKey(year, month)).filter(function (c) { return c.type === 'name'; });
 
   rows.forEach(function (r) {
     nameCols.forEach(function (col) {
