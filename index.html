@@ -871,6 +871,22 @@ function openEditor(cell) {
 function saveCellValue(date, field, value) {
   var row = rowForDate(date);
   if (!row) { row = { Date: date }; STATE.scheduleAll.push(row); }
+
+  if (value) {
+    var ym = date.slice(0, 7);
+    var cols = getColumnsForMonth(ym);
+    var col = cols.filter(function (c) { return c.id === field; })[0];
+    if (col && col.type === 'name') {
+      var siblings = cols.filter(function (c) { return c.type === 'name' && c.label === col.label && c.id !== field; });
+      var dup = siblings.some(function (s) { return row[s.id] === value; });
+      if (dup) {
+        showToast('⚠ ' + value + ' មានរួចហើយក្នុងក្រុម "' + col.label + '" ថ្ងៃនេះ — មិនអាចដាក់ស្ទួនបានទេ');
+        renderSchedule();
+        return;
+      }
+    }
+  }
+
   row[field] = value;
 
   renderSchedule();
