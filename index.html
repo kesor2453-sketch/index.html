@@ -278,12 +278,30 @@ var RATES = { SPV_Day1: 25, SPV_Day2: 25, SPV_Day3: 25, SPV_Night: 25 };
 var KHR_PER_USD = 4000;
 
 var DEFAULT_COLUMNS = [
-  { id: 'SPV_Day1', label: 'SPV ១', type: 'name' },
-  { id: 'SPV_Day2', label: 'SPV ២', type: 'name' },
-  { id: 'SPV_Day3', label: 'SPV ៣', type: 'name' },
-  { id: 'SPV_Night', label: 'SPV យប់', type: 'name' },
+  { id: 'SPV_Day1', label: 'ព្រឹក ១', type: 'name' },
+  { id: 'SPV_Day2', label: 'ព្រឹក ២', type: 'name' },
+  { id: 'SPV_Day3', label: 'ព្រឹក ៣', type: 'name' },
+  { id: 'SPV_Night', label: 'យប់', type: 'name' },
   { id: 'SPV_Off', label: 'ផ្សេងៗ', type: 'text' }
 ];
+
+// One-time migration: any month already stored with the old default labels
+// ("SPV ១", "SPV យប់", ...) gets updated to the new labels automatically —
+// but only an exact match on the OLD default text, so a label the user has
+// since renamed by hand is never touched.
+var OLD_DEFAULT_LABELS = { SPV_Day1: 'SPV ១', SPV_Day2: 'SPV ២', SPV_Day3: 'SPV ៣', SPV_Night: 'SPV យប់' };
+function migrateOldDefaultLabels() {
+  var changed = false;
+  Object.keys(STATE.columnsByMonth).forEach(function (ym) {
+    STATE.columnsByMonth[ym].forEach(function (c) {
+      if (OLD_DEFAULT_LABELS[c.id] && c.label === OLD_DEFAULT_LABELS[c.id]) {
+        var fresh = DEFAULT_COLUMNS.filter(function (dc) { return dc.id === c.id; })[0];
+        if (fresh) { c.label = fresh.label; changed = true; }
+      }
+    });
+  });
+  return changed;
+}
 
 var STATE = {
   doctors: [],
@@ -357,6 +375,7 @@ document.addEventListener('DOMContentLoaded', function () {
       STATE.doctors = data.doctors || [];
       STATE.scheduleAll = data.scheduleAll || [];
       STATE.columnsByMonth = data.columnsByMonth || {};
+      if (migrateOldDefaultLabels()) persistRemoteState();
     } else if (!firstSnapshotHandled) {
       STATE.doctors = seedDefaultDoctors();
       STATE.columnsByMonth = {};
