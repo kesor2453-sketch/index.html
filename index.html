@@ -831,6 +831,31 @@ function harvestNames(fields) {
   return Object.keys(set).sort();
 }
 
+function lastEditedText(date, field) {
+  var row = rowForDate(date);
+  var meta = row && row._meta && row._meta[field];
+  if (!meta) return null;
+  var d = new Date(meta.at);
+  return pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+
+function makeHistoryBtn(date, field) {
+  var text = lastEditedText(date, field);
+  if (!text) return null;
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = '🕐';
+  btn.title = 'មើលកាលបរិច្ឆេទកែចុងក្រោយ';
+  btn.style.cssText = 'border:none;background:none;cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0;';
+  // mousedown + preventDefault (not click) so the input never loses focus
+  // first and auto-commits/closes the editor before this can run.
+  btn.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    showToast('🕐 កែចុងក្រោយ៖ ' + text);
+  });
+  return btn;
+}
+
 function openEditor(cell) {
   if (STATE.editing) return;
   var date = cell.dataset.date;
@@ -848,19 +873,24 @@ function openEditor(cell) {
     textInput.placeholder = 'សរសេរបំពេញ...';
 
     cell.innerHTML = '';
+    cell.style.display = 'flex';
+    cell.style.alignItems = 'center';
     cell.appendChild(textInput);
+    var histBtnText = makeHistoryBtn(date, field);
+    if (histBtnText) cell.appendChild(histBtnText);
     textInput.focus();
     textInput.select();
 
     function commitText() {
       var newVal = textInput.value.trim();
       STATE.editing = null;
+      cell.style.display = '';
       if (newVal === currentVal) { renderSchedule(); return; }
       saveCellValue(date, field, newVal);
     }
     textInput.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { textInput.blur(); }
-      if (e.key === 'Escape') { STATE.editing = null; renderSchedule(); }
+      if (e.key === 'Escape') { STATE.editing = null; cell.style.display = ''; renderSchedule(); }
     });
     textInput.addEventListener('blur', function () { setTimeout(commitText, 80); });
     return;
@@ -891,20 +921,25 @@ function openEditor(cell) {
   nameInput.placeholder = 'វាយបញ្ចូលឈ្មោះ...';
 
   cell.innerHTML = '';
+  cell.style.display = 'flex';
+  cell.style.alignItems = 'center';
   cell.appendChild(nameInput);
   cell.appendChild(datalist);
+  var histBtnName = makeHistoryBtn(date, field);
+  if (histBtnName) cell.appendChild(histBtnName);
   nameInput.focus();
   nameInput.select();
 
   function commitName() {
     var newVal = nameInput.value.trim();
     STATE.editing = null;
+    cell.style.display = '';
     if (newVal === currentVal) { renderSchedule(); return; }
     saveCellValue(date, field, newVal);
   }
   nameInput.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { nameInput.blur(); }
-    if (e.key === 'Escape') { STATE.editing = null; renderSchedule(); }
+    if (e.key === 'Escape') { STATE.editing = null; cell.style.display = ''; renderSchedule(); }
   });
   nameInput.addEventListener('blur', function () { setTimeout(commitName, 80); });
 }
@@ -929,6 +964,8 @@ function saveCellValue(date, field, value) {
   }
 
   row[field] = value;
+  row._meta = row._meta || {};
+  row._meta[field] = { at: new Date().toISOString() };
 
   renderSchedule();
   showToast('រក្សាទុករួចរាល់ ✓');
