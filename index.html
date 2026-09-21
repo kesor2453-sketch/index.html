@@ -186,6 +186,7 @@
       <div class="tab active" data-panel="panel-schedule">កាលវិភាគ</div>
       <div class="tab" data-panel="panel-doctors">គ្រូពេទ្យ</div>
       <div class="tab" data-panel="panel-payroll">ចំនួនថ្ងៃយាម</div>
+      <div class="tab" data-panel="panel-log">កំណត់ត្រាកែប្រែ</div>
     </div>
   </header>
 
@@ -199,7 +200,6 @@
           <button class="nav-btn" id="nextMonth">›</button>
           <button class="today-btn" id="todayBtn">ខែនេះ</button>
           <select class="today-btn" id="monthPicker" style="cursor:pointer;"></select>
-          <button type="button" class="today-btn complete-btn" id="completeBtnSchedule" onclick="toggleMonthComplete('schedule')"></button>
         </div>
         <div class="legend">
           <span><span class="dot" style="background:var(--spv)"></span> SPV</span>
@@ -216,7 +216,6 @@
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
         <div style="font-weight:700;font-size:15px;">បញ្ជីគ្រូពេទ្យ</div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <button type="button" class="today-btn complete-btn" id="completeBtnDoctors" onclick="toggleMonthComplete('doctors')"></button>
           <button type="button" id="doctorEditToggle" onclick="toggleDoctorEditMode()"
             style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 14px;font-size:12.5px;cursor:pointer;color:var(--brand);font-weight:600;">✎ កែឈ្មោះទាំងអស់</button>
         </div>
@@ -241,10 +240,25 @@
           <div class="month-label" id="monthLabelPay">—</div>
           <button class="nav-btn" id="nextMonthPay">›</button>
           <select class="today-btn" id="monthPickerPay" style="cursor:pointer;"></select>
-          <button type="button" class="today-btn complete-btn" id="completeBtnPayroll" onclick="toggleMonthComplete('payroll')"></button>
         </div>
       </div>
       <div id="payWrap"></div>
+    </div>
+  </div>
+
+  <!-- EDIT LOG -->
+  <div class="panel" id="panel-log">
+    <div class="card">
+      <div class="month-nav">
+        <div class="left">
+          <button class="nav-btn" id="prevMonthLog">‹</button>
+          <div class="month-label" id="monthLabelLog">—</div>
+          <button class="nav-btn" id="nextMonthLog">›</button>
+          <select class="today-btn" id="monthPickerLog" style="cursor:pointer;"></select>
+          <button type="button" class="today-btn complete-btn" id="startLogBtn" onclick="startLogging()"></button>
+        </div>
+      </div>
+      <div id="logWrap"></div>
     </div>
   </div>
 
@@ -320,13 +334,15 @@ var STATE = {
   doctors: [],
   scheduleAll: [],
   columnsByMonth: {}, // { 'YYYY-MM': [ {id,label,type}, ... ] } — each month keeps its own column set
-  completedMonths: {}, // { 'YYYY-MM': true } — months marked as finished
+  recordingStarted: {}, // { 'YYYY-MM': true } — months where the edit log has been started
   rates: RATES,
   khrPerUsd: KHR_PER_USD,
   year: new Date().getFullYear(),
   month: new Date().getMonth() + 1,
   payYear: null,
   payMonth: null,
+  logYear: null,
+  logMonth: null,
   editing: null
 };
 
@@ -343,34 +359,29 @@ function getColumnsForMonth(ym) {
 function monthKey(y, m) { return y + '-' + pad2(m); }
 function currentScheduleMonthKey() { return monthKey(STATE.year, STATE.month); }
 
-// "Mark month complete" — Schedule and Doctors share the Schedule tab's
-// selected month; Payroll (ចំនួនថ្ងៃយាម) uses its own independently-navigated month.
-function toggleMonthComplete(which) {
-  var y = (which === 'payroll') ? STATE.payYear : STATE.year;
-  var m = (which === 'payroll') ? STATE.payMonth : STATE.month;
-  var key = monthKey(y, m);
-  STATE.completedMonths[key] = !STATE.completedMonths[key];
+// Edit log (កំណត់ត្រាកែប្រែ) — a separate tab, navigated by its own month
+// (STATE.logYear/logMonth), independent from the Schedule/Payroll months.
+// Recording is off by default for every month; pressing "ចាប់ផ្តើមកត់ត្រា"
+// turns it on for that one month and it then stays on permanently — from
+// that point forward every cell edit made that month is appended to a
+// running log (row._log), never overwritten. Months where it was never
+// started show no log at all, whether or not edits happened.
+function startLogging() {
+  var key = monthKey(STATE.logYear, STATE.logMonth);
+  if (STATE.recordingStarted[key]) return;
+  STATE.recordingStarted[key] = true;
   persistRemoteState();
-  renderCompleteButtons();
-  showToast(STATE.completedMonths[key] ? 'សម្គាល់ថាចប់ខែនេះ ✓' : 'លុបសម្គាល់ចប់ខែនេះ');
+  renderLog();
+  showToast('ចាប់ផ្តើមកត់ត្រារួចរាល់ ✓ — ការកែប្រែបន្ទាប់ពីនេះនឹងត្រូវកត់ត្រាទុក');
 }
-window.toggleMonthComplete = toggleMonthComplete;
+window.startLogging = startLogging;
 
-function setCompleteBtn(id, done) {
-  var btn = document.getElementById(id);
+function setLogBtn(started) {
+  var btn = document.getElementById('startLogBtn');
   if (!btn) return;
-  btn.textContent = done ? '✅ ចប់ខែនេះ' : '☐ សម្គាល់ថាចប់ខែនេះ';
-  btn.className = 'today-btn complete-btn ' + (done ? 'is-complete' : 'is-incomplete');
-}
-
-function renderCompleteButtons() {
-  var schedDone = !!STATE.completedMonths[monthKey(STATE.year, STATE.month)];
-  setCompleteBtn('completeBtnSchedule', schedDone);
-  setCompleteBtn('completeBtnDoctors', schedDone);
-  if (STATE.payYear) {
-    var payDone = !!STATE.completedMonths[monthKey(STATE.payYear, STATE.payMonth)];
-    setCompleteBtn('completeBtnPayroll', payDone);
-  }
+  btn.textContent = started ? '● កំពុងកត់ត្រា' : '▶ ចាប់ផ្តើមកត់ត្រា';
+  btn.disabled = started;
+  btn.className = 'today-btn complete-btn ' + (started ? 'is-complete' : 'is-incomplete');
 }
 
 var MONTH_NAMES_KM = ['មករា','កុម្ភៈ','មីនា','មេសា','ឧសភា','មិថុនា','កក្កដា','សីហា','កញ្ញា','តុលា','វិច្ឆិកា','ធ្នូ'];
@@ -391,7 +402,7 @@ function seedDefaultDoctors() {
 function persistRemoteState() {
   setDoc(scheduleDocRef, {
     doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columnsByMonth: STATE.columnsByMonth,
-    completedMonths: STATE.completedMonths
+    recordingStarted: STATE.recordingStarted
   }).catch(function (err) {
     showToast('⚠ មិនអាចផ្ញើទៅ Firestore បានទេ៖ ' + err.message);
   });
@@ -420,7 +431,7 @@ document.addEventListener('DOMContentLoaded', function () {
       STATE.doctors = data.doctors || [];
       STATE.scheduleAll = data.scheduleAll || [];
       STATE.columnsByMonth = data.columnsByMonth || {};
-      STATE.completedMonths = data.completedMonths || {};
+      STATE.recordingStarted = data.recordingStarted || {};
       if (migrateOldDefaultLabels()) persistRemoteState();
     } else if (!firstSnapshotHandled) {
       STATE.doctors = seedDefaultDoctors();
@@ -429,9 +440,11 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     firstSnapshotHandled = true;
     if (!STATE.payYear) { STATE.payYear = STATE.year; STATE.payMonth = STATE.month; }
+    if (!STATE.logYear) { STATE.logYear = STATE.year; STATE.logMonth = STATE.month; }
     loadSchedule();
     renderDoctors();
     if (document.getElementById('panel-payroll').classList.contains('active')) loadPayroll();
+    if (document.getElementById('panel-log').classList.contains('active')) loadLog();
   }, function (err) {
     document.getElementById('scheduleWrap').innerHTML =
       '<div class="empty-state">⚠ មិនអាចភ្ជាប់ Firestore បានទេ៖ ' + escapeHtml(err.message) +
@@ -498,6 +511,7 @@ function bindTabs() {
       document.getElementById(t.dataset.panel).classList.add('active');
       if (t.dataset.panel === 'panel-payroll') loadPayroll();
       if (t.dataset.panel === 'panel-doctors') renderDoctors();
+      if (t.dataset.panel === 'panel-log') loadLog();
     });
   });
 }
@@ -523,6 +537,14 @@ function bindMonthNav() {
     STATE.payYear = Number(parts[0]); STATE.payMonth = Number(parts[1]);
     loadPayroll();
   });
+
+  document.getElementById('prevMonthLog').addEventListener('click', function () { shiftLogMonth(-1); });
+  document.getElementById('nextMonthLog').addEventListener('click', function () { shiftLogMonth(1); });
+  document.getElementById('monthPickerLog').addEventListener('change', function (e) {
+    var parts = e.target.value.split('-');
+    STATE.logYear = Number(parts[0]); STATE.logMonth = Number(parts[1]);
+    loadLog();
+  });
 }
 
 function getAvailableMonths() {
@@ -545,14 +567,21 @@ function refreshMonthPickers() {
   var months = getAvailableMonths();
   var cur = STATE.year + '-' + pad2(STATE.month);
   var curPay = STATE.payYear + '-' + pad2(STATE.payMonth);
+  var curLog = STATE.logYear + '-' + pad2(STATE.logMonth);
   var picker = document.getElementById('monthPicker');
   var pickerPay = document.getElementById('monthPickerPay');
+  var pickerLog = document.getElementById('monthPickerLog');
   picker.innerHTML = months.map(function (ym) {
     return '<option value="' + ym + '"' + (ym === cur ? ' selected' : '') + '>' + monthOptionLabel(ym) + '</option>';
   }).join('');
   pickerPay.innerHTML = months.map(function (ym) {
     return '<option value="' + ym + '"' + (ym === curPay ? ' selected' : '') + '>' + monthOptionLabel(ym) + '</option>';
   }).join('');
+  if (pickerLog) {
+    pickerLog.innerHTML = months.map(function (ym) {
+      return '<option value="' + ym + '"' + (ym === curLog ? ' selected' : '') + '>' + monthOptionLabel(ym) + '</option>';
+    }).join('');
+  }
 }
 
 function shiftMonth(delta) {
@@ -567,12 +596,17 @@ function shiftPayMonth(delta) {
   STATE.payYear = y; STATE.payMonth = m;
   loadPayroll();
 }
+function shiftLogMonth(delta) {
+  var m = STATE.logMonth + delta, y = STATE.logYear;
+  if (m < 1) { m = 12; y--; } else if (m > 12) { m = 1; y++; }
+  STATE.logYear = y; STATE.logMonth = m;
+  loadLog();
+}
 
 function loadSchedule() {
   document.getElementById('monthLabel').textContent = MONTH_NAMES_KM[STATE.month - 1] + ' ' + STATE.year;
   renderSchedule();
   refreshMonthPickers();
-  renderCompleteButtons();
 }
 
 function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
@@ -964,8 +998,16 @@ function saveCellValue(date, field, value) {
   }
 
   row[field] = value;
+  var nowIso = new Date().toISOString();
   row._meta = row._meta || {};
-  row._meta[field] = { at: new Date().toISOString() };
+  row._meta[field] = { at: nowIso };
+
+  var logKey = date.slice(0, 7);
+  if (STATE.recordingStarted[logKey]) {
+    row._log = row._log || {};
+    row._log[field] = row._log[field] || [];
+    row._log[field].push({ at: nowIso, value: value });
+  }
 
   renderSchedule();
   showToast('រក្សាទុករួចរាល់ ✓');
@@ -980,7 +1022,6 @@ function renderDoctors() {
   var grid = document.getElementById('docGrid');
   var toggleBtn = document.getElementById('doctorEditToggle');
   if (toggleBtn) toggleBtn.textContent = doctorEditMode ? '💾 រក្សាទុកទាំងអស់' : '✎ កែឈ្មោះទាំងអស់';
-  renderCompleteButtons();
 
   if (!STATE.doctors.length) {
     grid.innerHTML = '<div class="empty-state">មិនទាន់មានទិន្នន័យគ្រូពេទ្យទេ</div>';
@@ -1093,7 +1134,59 @@ function loadPayroll() {
   var summary = computePayrollClient(STATE.payYear, STATE.payMonth);
   renderPayroll(summary);
   refreshMonthPickers();
-  renderCompleteButtons();
+}
+
+// ---- Edit log (កំណត់ត្រាកែប្រែ) ----
+function loadLog() {
+  if (!STATE.logYear) { STATE.logYear = STATE.year; STATE.logMonth = STATE.month; }
+  document.getElementById('monthLabelLog').textContent = MONTH_NAMES_KM[STATE.logMonth - 1] + ' ' + STATE.logYear;
+  renderLog();
+  refreshMonthPickers();
+}
+
+function renderLog() {
+  var y = STATE.logYear, m = STATE.logMonth;
+  var key = monthKey(y, m);
+  var started = !!STATE.recordingStarted[key];
+  setLogBtn(started);
+
+  var wrap = document.getElementById('logWrap');
+  if (!started) {
+    wrap.innerHTML = '<div class="empty-state">មិនទាន់ចាប់ផ្តើមកត់ត្រាសម្រាប់ខែនេះទេ — ចុច "▶ ចាប់ផ្តើមកត់ត្រា" ដើម្បីចាប់ផ្តើមកត់ត្រាការកែប្រែបន្ទាប់ពីនេះ</div>';
+    return;
+  }
+
+  var prefix = y + '-' + pad2(m);
+  var cols = getColumnsForMonth(key);
+  var entries = [];
+  STATE.scheduleAll.forEach(function (row) {
+    if (String(row.Date || '').indexOf(prefix) !== 0) return;
+    cols.forEach(function (c) {
+      var log = (row._log && row._log[c.id]) || [];
+      log.forEach(function (e) {
+        entries.push({ date: row.Date, field: c.label, value: e.value, at: e.at });
+      });
+    });
+  });
+  entries.sort(function (a, b) { return new Date(b.at) - new Date(a.at); });
+
+  if (!entries.length) {
+    wrap.innerHTML = '<div class="empty-state">កំពុងកត់ត្រា — មិនទាន់មានការកែប្រែចាប់តាំងពីចាប់ផ្តើមទេ</div>';
+    return;
+  }
+
+  var rows = entries.map(function (e) {
+    var d = new Date(e.at);
+    var when = pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    var dParts = e.date.split('-');
+    var valCell = e.value ? escapeHtml(e.value) : '<span style="color:var(--off);">(សម្អាត)</span>';
+    return '<tr><td>' + dParts[2] + '/' + dParts[1] + '</td><td>' + escapeHtml(e.field) + '</td><td>' + valCell +
+      '</td><td style="color:var(--sub);white-space:nowrap;">' + when + '</td></tr>';
+  }).join('');
+
+  wrap.innerHTML = '<div style="overflow-x:auto;"><table class="pay"><thead><tr>' +
+    '<th>ថ្ងៃ</th><th>វេន</th><th>តម្លៃដែលបានកែ</th><th style="text-align:right;">ពេលកែប្រែ</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
 function renderPayroll(summary) {
