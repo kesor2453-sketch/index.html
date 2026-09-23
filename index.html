@@ -181,6 +181,7 @@
   <header class="top">
     <div>
       <h1>កាលវិភាគគ្រូពេទ្យ (SOPHEAK VISAL CLINIC)</h1>
+      <div class="muted">ឧបករណ៍/អ្នកកែ៖ <span id="deviceNameLabel">—</span></div>
     </div>
     <div class="tabs">
       <div class="tab active" data-panel="panel-schedule">កាលវិភាគ</div>
@@ -200,6 +201,7 @@
           <button class="nav-btn" id="nextMonth">›</button>
           <button class="today-btn" id="todayBtn">ខែនេះ</button>
           <select class="today-btn" id="monthPicker" style="cursor:pointer;"></select>
+          <button type="button" class="today-btn complete-btn" id="unlockScheduleBtn" onclick="toggleScheduleLock()" style="display:none;"></button>
         </div>
         <div class="legend">
           <span><span class="dot" style="background:var(--spv)"></span> SPV</span>
@@ -255,7 +257,6 @@
           <div class="month-label" id="monthLabelLog">—</div>
           <button class="nav-btn" id="nextMonthLog">›</button>
           <select class="today-btn" id="monthPickerLog" style="cursor:pointer;"></select>
-          <button type="button" class="today-btn complete-btn" id="startLogBtn" onclick="startLogging()"></button>
         </div>
       </div>
       <div id="logWrap"></div>
@@ -334,7 +335,7 @@ var STATE = {
   doctors: [],
   scheduleAll: [],
   columnsByMonth: {}, // { 'YYYY-MM': [ {id,label,type}, ... ] } — each month keeps its own column set
-  recordingStarted: {}, // { 'YYYY-MM': true } — months where the edit log has been started
+  unlockedMonths: {}, // { 'YYYY-MM': true } — past months explicitly unlocked for schedule editing
   rates: RATES,
   khrPerUsd: KHR_PER_USD,
   year: new Date().getFullYear(),
@@ -359,29 +360,63 @@ function getColumnsForMonth(ym) {
 function monthKey(y, m) { return y + '-' + pad2(m); }
 function currentScheduleMonthKey() { return monthKey(STATE.year, STATE.month); }
 
-// Edit log (កំណត់ត្រាកែប្រែ) — a separate tab, navigated by its own month
-// (STATE.logYear/logMonth), independent from the Schedule/Payroll months.
-// Recording is off by default for every month; pressing "ចាប់ផ្តើមកត់ត្រា"
-// turns it on for that one month and it then stays on permanently — from
-// that point forward every cell edit made that month is appended to a
-// running log (row._log), never overwritten. Months where it was never
-// started show no log at all, whether or not edits happened.
-function startLogging() {
-  var key = monthKey(STATE.logYear, STATE.logMonth);
-  if (STATE.recordingStarted[key]) return;
-  STATE.recordingStarted[key] = true;
-  persistRemoteState();
-  renderLog();
-  showToast('ចាប់ផ្តើមកត់ត្រារួចរាល់ ✓ — ការកែប្រែបន្ទាប់ពីនេះនឹងត្រូវកត់ត្រាទុក');
+// Edit log (កំណត់ត្រាកែប្រែ) — automatic, tied to the real calendar. A month's
+// edits are recorded only while that month IS the actual current month; once
+// the month ends, recording for it stops permanently (no manual button, no
+// retroactive logging). Entries already recorded remain visible afterward.
+function todayYM() {
+  var d = new Date();
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1);
 }
-window.startLogging = startLogging;
+function isPastMonthKey(ym) { return ym < todayYM(); }
+function isFutureMonthKey(ym) { return ym > todayYM(); }
+function isCurrentMonthKey(ym) { return ym === todayYM(); }
 
-function setLogBtn(started) {
-  var btn = document.getElementById('startLogBtn');
+// Device name attached to every log entry — detected automatically from the
+// browser (iPhone / Samsung / Android / iPad / Desktop), no prompt needed.
+function getDeviceName() {
+  try {
+    var ua = navigator.userAgent || '';
+    if (/iPhone/i.test(ua)) return 'iPhone';
+    if (/iPad/i.test(ua)) return 'iPad';
+    if (/Android/i.test(ua)) return (/SAMSUNG|SM-/i.test(ua)) ? 'Samsung' : 'Android';
+    if (/Macintosh|Windows|Linux/i.test(ua)) return 'Desktop';
+    return 'ឧបករណ៍ផ្សេង';
+  } catch (e) {
+    return 'ឧបករណ៍ផ្សេង';
+  }
+}
+function renderDeviceNameLabel() {
+  var el = document.getElementById('deviceNameLabel');
+  if (el) el.textContent = getDeviceName();
+}
+
+// Schedule editing lock — a month whose date has passed becomes read-only
+// automatically. "unlockScheduleBtn" lets the user explicitly re-enable
+// editing for that one past month (toggle), independent of the edit log.
+function scheduleMonthLocked() {
+  var key = currentScheduleMonthKey();
+  return isPastMonthKey(key) && !STATE.unlockedMonths[key];
+}
+function toggleScheduleLock() {
+  var key = currentScheduleMonthKey();
+  STATE.unlockedMonths[key] = !STATE.unlockedMonths[key];
+  persistRemoteState();
+  renderSchedule();
+  renderScheduleLockButton();
+  showToast(STATE.unlockedMonths[key] ? 'បានដោះសោសម្រាប់កែខែនេះ ✓' : 'ចាក់សោខែនេះឡើងវិញ ✓');
+}
+window.toggleScheduleLock = toggleScheduleLock;
+
+function renderScheduleLockButton() {
+  var btn = document.getElementById('unlockScheduleBtn');
   if (!btn) return;
-  btn.textContent = started ? '● កំពុងកត់ត្រា' : '▶ ចាប់ផ្តើមកត់ត្រា';
-  btn.disabled = started;
-  btn.className = 'today-btn complete-btn ' + (started ? 'is-complete' : 'is-incomplete');
+  var key = currentScheduleMonthKey();
+  if (!isPastMonthKey(key)) { btn.style.display = 'none'; return; }
+  var unlocked = !!STATE.unlockedMonths[key];
+  btn.style.display = '';
+  btn.textContent = unlocked ? '🔒 ចាក់សោខែនេះឡើងវិញ' : '🔓 កែប្រែខែនេះ';
+  btn.className = 'today-btn complete-btn ' + (unlocked ? 'is-complete' : 'is-incomplete');
 }
 
 var MONTH_NAMES_KM = ['មករា','កុម្ភៈ','មីនា','មេសា','ឧសភា','មិថុនា','កក្កដា','សីហា','កញ្ញា','តុលា','វិច្ឆិកា','ធ្នូ'];
@@ -402,7 +437,7 @@ function seedDefaultDoctors() {
 function persistRemoteState() {
   setDoc(scheduleDocRef, {
     doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columnsByMonth: STATE.columnsByMonth,
-    recordingStarted: STATE.recordingStarted
+    unlockedMonths: STATE.unlockedMonths
   }).catch(function (err) {
     showToast('⚠ មិនអាចផ្ញើទៅ Firestore បានទេ៖ ' + err.message);
   });
@@ -415,6 +450,7 @@ document.addEventListener('DOMContentLoaded', function () {
   bindMonthNav();
   bindDoctorForm();
   bindManualBackup();
+  renderDeviceNameLabel();
 
   if (firebaseConfig.apiKey.indexOf('PASTE_YOUR') === 0) {
     document.getElementById('scheduleWrap').innerHTML =
@@ -431,7 +467,7 @@ document.addEventListener('DOMContentLoaded', function () {
       STATE.doctors = data.doctors || [];
       STATE.scheduleAll = data.scheduleAll || [];
       STATE.columnsByMonth = data.columnsByMonth || {};
-      STATE.recordingStarted = data.recordingStarted || {};
+      STATE.unlockedMonths = data.unlockedMonths || {};
       if (migrateOldDefaultLabels()) persistRemoteState();
     } else if (!firstSnapshotHandled) {
       STATE.doctors = seedDefaultDoctors();
@@ -607,6 +643,7 @@ function loadSchedule() {
   document.getElementById('monthLabel').textContent = MONTH_NAMES_KM[STATE.month - 1] + ' ' + STATE.year;
   renderSchedule();
   refreshMonthPickers();
+  renderScheduleLockButton();
 }
 
 function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
@@ -648,8 +685,10 @@ function renderSchedule() {
   var today = new Date();
   var todayStr = today.getFullYear() + '-' + pad2(today.getMonth() + 1) + '-' + pad2(today.getDate());
   var cols = getColumnsForMonth(currentScheduleMonthKey());
+  var locked = scheduleMonthLocked();
 
   document.getElementById('monthLabel').textContent = MONTH_NAMES_KM[m - 1] + ' ' + y;
+  renderScheduleLockButton();
 
   var headerCells = cols.map(function (c, idx) {
     var inner;
@@ -673,7 +712,12 @@ function renderSchedule() {
       inner + '</th>';
   }).join('');
 
-  var html = '<div style="overflow-x:auto;"><table class="sched"><thead><tr>' +
+  var html = '';
+  if (locked) {
+    html += '<div style="background:var(--off-bg);color:#a52323;border-radius:10px;padding:9px 13px;font-size:12.5px;margin-bottom:12px;font-weight:600;">' +
+      '🔒 ខែនេះបានបញ្ចប់ហើយ និងត្រូវបានចាក់សោ — ចុច "🔓 កែប្រែខែនេះ" ខាងលើដើម្បីអនុញ្ញាតឲ្យកែ</div>';
+  }
+  html += '<div style="overflow-x:auto;"><table class="sched"><thead><tr>' +
     '<th style="text-align:left;">កាលបរិច្ឆេទ</th>' + headerCells +
     '<th style="width:60px;white-space:nowrap;">' +
     '<span class="col-add" title="បន្ថែមជួរឈរ" onclick="addColumn()">+</span> ' +
@@ -701,7 +745,7 @@ function renderSchedule() {
       '</span></td>';
 
     cols.forEach(function (c) {
-      html += (c.type === 'text') ? renderOffCell(dateStr, c.id, row[c.id]) : renderSlotCell(dateStr, c.id, row[c.id]);
+      html += (c.type === 'text') ? renderOffCell(dateStr, c.id, row[c.id], locked) : renderSlotCell(dateStr, c.id, row[c.id], locked);
     });
     html += '<td></td>';
     html += '</tr>';
@@ -892,6 +936,10 @@ function makeHistoryBtn(date, field) {
 
 function openEditor(cell) {
   if (STATE.editing) return;
+  if (scheduleMonthLocked()) {
+    showToast('🔒 ខែនេះត្រូវបានចាក់សោ (ខែបានបញ្ចប់ហើយ) — ចុច "🔓 កែប្រែខែនេះ" ដើម្បីកែ');
+    return;
+  }
   var date = cell.dataset.date;
   var field = cell.dataset.field;
   var currentVal = cell.dataset.value;
@@ -997,16 +1045,17 @@ function saveCellValue(date, field, value) {
     }
   }
 
+  var oldValue = row[field] || '';
   row[field] = value;
   var nowIso = new Date().toISOString();
   row._meta = row._meta || {};
   row._meta[field] = { at: nowIso };
 
   var logKey = date.slice(0, 7);
-  if (STATE.recordingStarted[logKey]) {
+  if (isCurrentMonthKey(logKey)) {
     row._log = row._log || {};
     row._log[field] = row._log[field] || [];
-    row._log[field].push({ at: nowIso, value: value });
+    row._log[field].push({ at: nowIso, value: value, oldValue: oldValue, device: getDeviceName() });
   }
 
   renderSchedule();
@@ -1147,12 +1196,10 @@ function loadLog() {
 function renderLog() {
   var y = STATE.logYear, m = STATE.logMonth;
   var key = monthKey(y, m);
-  var started = !!STATE.recordingStarted[key];
-  setLogBtn(started);
-
   var wrap = document.getElementById('logWrap');
-  if (!started) {
-    wrap.innerHTML = '<div class="empty-state">មិនទាន់ចាប់ផ្តើមកត់ត្រាសម្រាប់ខែនេះទេ — ចុច "▶ ចាប់ផ្តើមកត់ត្រា" ដើម្បីចាប់ផ្តើមកត់ត្រាការកែប្រែបន្ទាប់ពីនេះ</div>';
+
+  if (isFutureMonthKey(key)) {
+    wrap.innerHTML = '<div class="empty-state">ខែនេះមិនទាន់មកដល់ទេ — កំណត់ត្រានឹងចាប់ផ្តើមកត់ត្រាដោយស្វ័យប្រវត្តិកាលបើដល់ខែនេះ</div>';
     return;
   }
 
@@ -1164,28 +1211,36 @@ function renderLog() {
     cols.forEach(function (c) {
       var log = (row._log && row._log[c.id]) || [];
       log.forEach(function (e) {
-        entries.push({ date: row.Date, field: c.label, value: e.value, at: e.at });
+        entries.push({ date: row.Date, field: c.label, value: e.value, oldValue: e.oldValue, device: e.device, at: e.at });
       });
     });
   });
   entries.sort(function (a, b) { return new Date(b.at) - new Date(a.at); });
 
   if (!entries.length) {
-    wrap.innerHTML = '<div class="empty-state">កំពុងកត់ត្រា — មិនទាន់មានការកែប្រែចាប់តាំងពីចាប់ផ្តើមទេ</div>';
+    wrap.innerHTML = isCurrentMonthKey(key)
+      ? '<div class="empty-state">កំពុងកត់ត្រា (ខែនេះ) — មិនទាន់មានការកែប្រែទេ</div>'
+      : '<div class="empty-state">ខែនេះបានបញ្ចប់ — មិនមានការកែប្រែត្រូវបានកត់ត្រាទុកទេ</div>';
     return;
   }
+
+  var note = isCurrentMonthKey(key)
+    ? '<div style="color:var(--brand);font-size:12px;font-weight:600;margin-bottom:8px;">● កំពុងកត់ត្រា (ខែនេះ)</div>'
+    : '<div style="color:var(--sub);font-size:12px;font-weight:600;margin-bottom:8px;">🔒 ខែនេះបានបញ្ចប់ការកត់ត្រា</div>';
 
   var rows = entries.map(function (e) {
     var d = new Date(e.at);
     var when = pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
     var dParts = e.date.split('-');
-    var valCell = e.value ? escapeHtml(e.value) : '<span style="color:var(--off);">(សម្អាត)</span>';
-    return '<tr><td>' + dParts[2] + '/' + dParts[1] + '</td><td>' + escapeHtml(e.field) + '</td><td>' + valCell +
-      '</td><td style="color:var(--sub);white-space:nowrap;">' + when + '</td></tr>';
+    var fromCell = e.oldValue ? escapeHtml(e.oldValue) : '<span style="color:var(--sub);">(ទទេ)</span>';
+    var toCell = e.value ? escapeHtml(e.value) : '<span style="color:var(--off);">(សម្អាត)</span>';
+    var deviceCell = e.device ? escapeHtml(e.device) : '<span style="color:var(--sub);">—</span>';
+    return '<tr><td>' + dParts[2] + '/' + dParts[1] + '</td><td>' + escapeHtml(e.field) + '</td><td>' + fromCell +
+      '</td><td>→ ' + toCell + '</td><td>' + deviceCell + '</td><td style="color:var(--sub);white-space:nowrap;">' + when + '</td></tr>';
   }).join('');
 
-  wrap.innerHTML = '<div style="overflow-x:auto;"><table class="pay"><thead><tr>' +
-    '<th>ថ្ងៃ</th><th>វេន</th><th>តម្លៃដែលបានកែ</th><th style="text-align:right;">ពេលកែប្រែ</th>' +
+  wrap.innerHTML = note + '<div style="overflow-x:auto;"><table class="pay"><thead><tr>' +
+    '<th>ថ្ងៃ</th><th>វេន</th><th>ពី</th><th>ទៅ</th><th>ឧបករណ៍/អ្នកកែ</th><th style="text-align:right;">ពេលកែប្រែ</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
