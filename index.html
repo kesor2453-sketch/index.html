@@ -792,9 +792,18 @@ function hashString(str) {
   for (var i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); }
   return Math.abs(hash);
 }
+function contrastTextFor(hex) {
+  hex = String(hex || '').replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(function (c) { return c + c; }).join('');
+  if (hex.length !== 6) return '#1c2430';
+  var r = parseInt(hex.substr(0, 2), 16), g = parseInt(hex.substr(2, 2), 16), b = parseInt(hex.substr(4, 2), 16);
+  var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#1c2430' : '#ffffff';
+}
 function getNameColors(name) {
   if (!name) return { bg: null, text: '#1c2430' };
   var doc = STATE.doctors.filter(function (d) { return d.NameSPV === name; })[0];
+  if (doc && doc.color) return { bg: doc.color, text: contrastTextFor(doc.color) };
   var key = doc ? doc.ID : name;
   if (MANUAL_DOCTOR_COLORS[key]) return MANUAL_DOCTOR_COLORS[key];
   return { bg: null, text: NAME_COLOR_PALETTE[hashString(key) % NAME_COLOR_PALETTE.length] };
@@ -989,10 +998,26 @@ function renderDoctors() {
     }
     var c = getNameColors(name);
     var badgeStyle = 'color:' + c.text + ';' + (c.bg ? 'background:' + c.bg + ';padding:2px 8px;border-radius:6px;' : '');
-    return '<div class="doc-item">' +
+    var swatchValue = d.color || c.bg || '#ffffff';
+    return '<div class="doc-item" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
       '<span class="name" style="font-weight:700;font-size:13.5px;' + badgeStyle + '">' + escapeHtml(name) + '</span>' +
+      '<input type="color" class="doc-color-input" data-id="' + d.ID + '" value="' + swatchValue + '" title="ប្តូរពណ៌ឈ្មោះ" ' +
+      'style="width:28px;height:28px;border:1px solid var(--line);border-radius:6px;padding:0;cursor:pointer;flex-shrink:0;">' +
       '</div>';
   }).join('');
+
+  document.querySelectorAll('.doc-color-input').forEach(function (input) {
+    input.addEventListener('change', function () {
+      var id = input.dataset.id;
+      var doc = STATE.doctors.filter(function (d) { return d.ID === id; })[0];
+      if (!doc) return;
+      doc.color = input.value;
+      persistRemoteState();
+      renderDoctors();
+      renderSchedule();
+      showToast('ប្តូរពណ៌ឈ្មោះរួចរាល់ ✓');
+    });
+  });
 }
 
 function toggleDoctorEditMode() {
