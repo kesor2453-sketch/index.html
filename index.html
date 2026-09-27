@@ -258,9 +258,6 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ============================================================
-   CONFIG
-   ============================================================ */
-/* ============================================================
    CONFIG — paste your NEW Firebase project's config here
    (Firebase Console → Project Settings → Your apps → </> Web app)
    ============================================================ */
@@ -311,6 +308,29 @@ function migrateOldDefaultLabels() {
         if (fresh) { c.label = fresh.label; changed = true; }
       }
     });
+  });
+  return changed;
+}
+
+// Keep "misc/other" (type 'text') columns — e.g. ផ្សេងៗ — always at the
+// very end of a month's column list, no matter how columns were added,
+// dragged, or migrated from old data. Relative order of everything else is
+// preserved.
+function enforceMiscLast(cols) {
+  var others = cols.filter(function (c) { return c.type !== 'text'; });
+  var misc = cols.filter(function (c) { return c.type === 'text'; });
+  var reordered = others.concat(misc);
+  var changed = reordered.some(function (c, i) { return cols[i] !== c; });
+  if (changed) {
+    cols.length = 0;
+    reordered.forEach(function (c) { cols.push(c); });
+  }
+  return changed;
+}
+function enforceMiscLastAllMonths() {
+  var changed = false;
+  Object.keys(STATE.columnsByMonth).forEach(function (ym) {
+    if (enforceMiscLast(STATE.columnsByMonth[ym])) changed = true;
   });
   return changed;
 }
@@ -448,7 +468,9 @@ document.addEventListener('DOMContentLoaded', function () {
       STATE.scheduleAll = data.scheduleAll || [];
       STATE.columnsByMonth = data.columnsByMonth || {};
       STATE.unlockedMonths = data.unlockedMonths || {};
-      if (migrateOldDefaultLabels()) persistRemoteState();
+      var didMigrate = migrateOldDefaultLabels();
+      var didReorder = enforceMiscLastAllMonths();
+      if (didMigrate || didReorder) persistRemoteState();
     } else if (!firstSnapshotHandled) {
       STATE.doctors = seedDefaultDoctors();
       STATE.columnsByMonth = {};
@@ -697,6 +719,7 @@ function moveColumn(id, delta) {
   if (idx === -1 || newIdx < 0 || newIdx >= cols.length) return;
   var moved = cols.splice(idx, 1)[0];
   cols.splice(newIdx, 0, moved);
+  enforceMiscLast(cols);
   persistRemoteState();
   renderSchedule();
 }
@@ -723,6 +746,7 @@ function onColDrop(e, targetId) {
   if (fromIdx === -1 || toIdx === -1) return;
   var moved = cols.splice(fromIdx, 1)[0];
   cols.splice(toIdx, 0, moved);
+  enforceMiscLast(cols);
   persistRemoteState();
   renderSchedule();
   showToast('ប្តូរលំដាប់ជួរឈររួចរាល់ ✓');
@@ -749,10 +773,20 @@ window.renameColumn = renameColumn;
 
 function addColumn() {
   var cols = getColumnsForMonth(currentScheduleMonthKey());
-  var label = window.prompt('ឈ្មោះជួរឈរថ្មី៖', 'SPV ' + (cols.filter(function (c) { return c.type === 'name'; }).length + 1));
+  var nameCols = cols.filter(function (c) { return c.type === 'name'; });
+  var label = window.prompt('ឈ្មោះជួរឈរថ្មី៖', 'SPV ' + (nameCols.length + 1));
   if (!label) return;
   var id = 'col_' + Date.now();
-  cols.push({ id: id, label: label, type: 'name' });
+  var newCol = { id: id, label: label, type: 'name' };
+  // Insert before any "misc/other" (type 'text') column — e.g. ផ្សេងៗ —
+  // so a newly added shift column always lands in front of it, and
+  // ផ្សេងៗ always stays last automatically without needing manual reorder.
+  var textIdx = cols.findIndex(function (c) { return c.type === 'text'; });
+  if (textIdx === -1) {
+    cols.push(newCol);
+  } else {
+    cols.splice(textIdx, 0, newCol);
+  }
   persistRemoteState();
   renderSchedule();
   showToast('បន្ថែមជួរឈររួចរាល់ ✓ (សម្រាប់តែខែនេះ)');
@@ -1087,8 +1121,12 @@ function computePayrollClient(year, month) {
       var key = doc ? doc.ID : name;
       var displayName = doc ? doc.NameSPV : name;
       if (!spvCounts[key]) spvCounts[key] = { name: displayName, dayShifts: 0, nightShifts: 0, shifts: 0 };
-      // Classify by the column's current header text, not a fixed id — so
-      // renaming a header to/from "ព្រឹក"/"យប់" reclassifies it automatically.
+      // Classify purely by whether the column's current header TEXT contains
+      // "យប់" (night) or "ព្រឹក" (morning) — never by the column's id/number.
+      // So any number of columns sharing that same header word (e.g. two
+      // separate "យប់" columns for 2 night doctors) all roll into ONE
+      // nightShifts total per doctor — no need to track them separately by
+      // "column #2" etc. Renaming a header reclassifies it automatically.
       var isNight = col.label.indexOf('យប់') !== -1;
       var isMorning = col.label.indexOf('ព្រឹក') !== -1;
       if (isNight) spvCounts[key].nightShifts++;
