@@ -168,6 +168,22 @@
   @keyframes spin{to{transform:rotate(360deg);}}
 
   .empty-state{text-align:center;padding:30px;color:var(--sub);font-size:13px;}
+
+  :root{ --print-scale: 0.7; }
+  @media print{
+    @page{ size: landscape; margin: 8mm; }
+    body{ background:#fff; }
+    header.top, .tabs, .toast{ display:none !important; }
+    .panel{ display:none !important; }
+    .panel.active{ display:block !important; }
+    .no-print{ display:none !important; }
+    #panel-schedule > .card:nth-of-type(2){ display:none !important; } /* phone list not printed */
+    .card{ box-shadow:none !important; padding:0 !important; margin:0 !important; border-radius:0 !important; }
+    #scheduleWrap{ zoom: var(--print-scale, 1); }
+    #scheduleWrap > div{ overflow: visible !important; }
+    table.sched thead th{ position:static !important; }
+    .col-add, .col-move, .col-del{ display:none !important; }
+  }
 </style>
 </head>
 <body>
@@ -198,17 +214,27 @@
           <select class="today-btn" id="monthPicker" style="cursor:pointer;"></select>
           <button type="button" class="today-btn complete-btn" id="unlockScheduleBtn" onclick="toggleScheduleLock()" style="display:none;"></button>
         </div>
+        <div class="no-print" style="display:flex;align-items:center;gap:6px;">
+          <select class="today-btn" id="printScaleSelect" style="cursor:pointer;" title="ទំហំសម្រាប់ព្រីន">
+            <option value="1">100%</option>
+            <option value="0.9">90%</option>
+            <option value="0.8">80%</option>
+            <option value="0.7" selected>70%</option>
+            <option value="0.6">60%</option>
+            <option value="0.5">50%</option>
+            <option value="0.4">40%</option>
+          </select>
+          <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
+        </div>
       </div>
       <div id="scheduleWrap"></div>
     </div>
     <div class="card">
-      <div style="font-weight:700;font-size:15px;margin-bottom:10px;">លេខទូរស័ព្ទគ្រូពេទ្យ</div>
-      <div id="phoneListWrap"></div>
-      <form class="add-doc" id="addPhoneForm">
-        <input type="text" id="newPhoneName" placeholder="ឈ្មោះ">
-        <input type="text" id="newPhoneNumber" placeholder="លេខទូរស័ព្ទ">
-        <button type="submit">+ បន្ថែម</button>
-      </form>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="font-weight:700;font-size:15px;">លេខទូរស័ព្ទគ្រូពេទ្យ</div>
+        <span class="col-add" id="phoneToggleBtn" onclick="togglePhoneListVisible()">បង្ហាញ</span>
+      </div>
+      <div id="phoneListWrap" style="display:none;"></div>
     </div>
   </div>
 
@@ -226,6 +252,14 @@
       <form class="add-doc" id="addDocForm">
         <input type="text" id="newName" placeholder="ឈ្មោះ — ឧ. Dr.Sok Dara">
         <button type="submit" id="addDocBtn">+ បន្ថែមគ្រូពេទ្យ</button>
+      </form>
+    </div>
+    <div class="card">
+      <div style="font-weight:700;font-size:15px;margin-bottom:10px;">លេខទូរស័ព្ទគ្រូពេទ្យ</div>
+      <form class="add-doc" id="addPhoneForm">
+        <select id="newPhoneName"></select>
+        <input type="text" id="newPhoneNumber" placeholder="លេខទូរស័ព្ទ">
+        <button type="submit">+ បន្ថែម</button>
       </form>
     </div>
   </div>
@@ -1089,29 +1123,29 @@ function renderDoctors() {
 
   if (!STATE.doctors.length) {
     grid.innerHTML = '<div class="empty-state">មិនទាន់មានទិន្នន័យគ្រូពេទ្យទេ</div>';
-    return;
-  }
-  grid.innerHTML = STATE.doctors.map(function (d) {
-    var name = d.NameSPV;
-    if (doctorEditMode) {
-      return '<div class="doc-item" style="display:flex;align-items:center;gap:6px;">' +
-        '<input type="text" class="edit-select doc-name-input" style="width:100%;" ' +
-        'value="' + escapeAttr(name) + '" data-id="' + d.ID + '" data-oldname="' + escapeAttr(name) + '">' +
+  } else {
+    grid.innerHTML = STATE.doctors.map(function (d) {
+      var name = d.NameSPV;
+      if (doctorEditMode) {
+        return '<div class="doc-item" style="display:flex;align-items:center;gap:6px;">' +
+          '<input type="text" class="edit-select doc-name-input" style="width:100%;" ' +
+          'value="' + escapeAttr(name) + '" data-id="' + d.ID + '" data-oldname="' + escapeAttr(name) + '">' +
+          '<span class="col-del" title="លុបគ្រូពេទ្យនេះ" onclick="deleteDoctor(\'' + d.ID + '\')">×</span>' +
+          '</div>';
+      }
+      var c = getNameColors(name);
+      var badgeStyle = 'color:' + c.text + ';' + (c.bg ? 'background:' + c.bg + ';padding:2px 8px;border-radius:6px;' : '');
+      var swatchValue = d.color || c.bg || '#ffffff';
+      return '<div class="doc-item" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+        '<span class="name" style="font-weight:700;font-size:13.5px;' + badgeStyle + '">' + escapeHtml(name) + '</span>' +
+        '<span style="display:flex;align-items:center;gap:4px;flex-shrink:0;">' +
+        '<input type="color" class="doc-color-input" data-id="' + d.ID + '" value="' + swatchValue + '" title="ប្តូរពណ៌ឈ្មោះ" ' +
+        'style="width:28px;height:28px;border:1px solid var(--line);border-radius:6px;padding:0;cursor:pointer;">' +
         '<span class="col-del" title="លុបគ្រូពេទ្យនេះ" onclick="deleteDoctor(\'' + d.ID + '\')">×</span>' +
+        '</span>' +
         '</div>';
-    }
-    var c = getNameColors(name);
-    var badgeStyle = 'color:' + c.text + ';' + (c.bg ? 'background:' + c.bg + ';padding:2px 8px;border-radius:6px;' : '');
-    var swatchValue = d.color || c.bg || '#ffffff';
-    return '<div class="doc-item" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
-      '<span class="name" style="font-weight:700;font-size:13.5px;' + badgeStyle + '">' + escapeHtml(name) + '</span>' +
-      '<span style="display:flex;align-items:center;gap:4px;flex-shrink:0;">' +
-      '<input type="color" class="doc-color-input" data-id="' + d.ID + '" value="' + swatchValue + '" title="ប្តូរពណ៌ឈ្មោះ" ' +
-      'style="width:28px;height:28px;border:1px solid var(--line);border-radius:6px;padding:0;cursor:pointer;">' +
-      '<span class="col-del" title="លុបគ្រូពេទ្យនេះ" onclick="deleteDoctor(\'' + d.ID + '\')">×</span>' +
-      '</span>' +
-      '</div>';
-  }).join('');
+    }).join('');
+  }
 
   document.querySelectorAll('.doc-color-input').forEach(function (input) {
     input.addEventListener('change', function () {
@@ -1125,6 +1159,9 @@ function renderDoctors() {
       showToast('ប្តូរពណ៌ឈ្មោះរួចរាល់ ✓');
     });
   });
+
+  populateAddPhoneNameSelect();
+  renderPhoneDirectory();
 }
 
 function deleteDoctor(id) {
@@ -1162,6 +1199,10 @@ function toggleDoctorEditMode() {
           if (row[c.id] === oldName) row[c.id] = newName;
         });
       });
+      // Keep the shared phone directory in sync too.
+      STATE.doctorPhones.forEach(function (p) {
+        if (p.name === oldName) p.name = newName;
+      });
     });
     if (changedCount > 0) {
       persistRemoteState();
@@ -1192,9 +1233,37 @@ function bindDoctorForm() {
   });
 }
 
-// ---- Phone directory (លេខទូរស័ព្ទគ្រូពេទ្យ) — shared across every month,
-// shown once below the schedule table. Editable and deletable, independent
-// of which month is currently being viewed.
+// ---- Phone directory (លេខទូរស័ព្ទគ្រូពេទ្យ) — shared across every month.
+// The add-new-entry form lives in the doctors panel; the list itself is
+// shown in the schedule panel below the calendar (collapsed by default —
+// see togglePhoneListVisible), and its name field is a dropdown built from
+// the current doctors list rather than free text.
+function doctorNameOptionsHtml(selectedName) {
+  var names = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
+  if (selectedName && names.indexOf(selectedName) === -1) names = names.concat([selectedName]);
+  return '<option value="">-- ជ្រើសរើសគ្រូពេទ្យ --</option>' + names.map(function (n) {
+    return '<option value="' + escapeAttr(n) + '"' + (n === selectedName ? ' selected' : '') + '>' + escapeHtml(n) + '</option>';
+  }).join('');
+}
+
+function populateAddPhoneNameSelect() {
+  var sel = document.getElementById('newPhoneName');
+  if (!sel) return;
+  var current = sel.value;
+  sel.innerHTML = doctorNameOptionsHtml('');
+  if (current && sel.querySelector('option[value="' + current.replace(/"/g, '\\"') + '"]')) sel.value = current;
+}
+
+function togglePhoneListVisible() {
+  var wrap = document.getElementById('phoneListWrap');
+  var btn = document.getElementById('phoneToggleBtn');
+  if (!wrap || !btn) return;
+  var showing = wrap.style.display !== 'none';
+  wrap.style.display = showing ? 'none' : '';
+  btn.textContent = showing ? 'បង្ហាញ' : 'លាក់';
+}
+window.togglePhoneListVisible = togglePhoneListVisible;
+
 function renderPhoneDirectory() {
   var wrap = document.getElementById('phoneListWrap');
   if (!wrap) return;
@@ -1202,15 +1271,15 @@ function renderPhoneDirectory() {
     wrap.innerHTML = '<div class="empty-state" style="padding:10px 0;">មិនទាន់មានលេខទូរស័ព្ទទេ</div>';
     return;
   }
-  wrap.innerHTML = STATE.doctorPhones.map(function (p) {
-    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
-      '<input type="text" class="edit-select" style="flex:1;" value="' + escapeAttr(p.name) +
-      '" data-id="' + p.id + '" data-field="name" onchange="updatePhoneEntry(this)">' +
-      '<input type="text" class="edit-select" style="flex:1;" value="' + escapeAttr(p.phone) +
+  wrap.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:10px;">' + STATE.doctorPhones.map(function (p) {
+    return '<div style="display:flex;flex-direction:column;gap:5px;min-width:140px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;position:relative;background:#fbfcfe;">' +
+      '<span class="col-del" title="លុប" onclick="deletePhoneEntry(\'' + p.id + '\')" style="position:absolute;top:3px;right:5px;">×</span>' +
+      '<select class="edit-select" style="font-weight:700;padding-right:16px;" data-id="' + p.id + '" data-field="name" onchange="updatePhoneEntry(this)">' +
+      doctorNameOptionsHtml(p.name) + '</select>' +
+      '<input type="text" class="edit-select" value="' + escapeAttr(p.phone) +
       '" data-id="' + p.id + '" data-field="phone" onchange="updatePhoneEntry(this)">' +
-      '<span class="col-del" title="លុប" onclick="deletePhoneEntry(\'' + p.id + '\')">×</span>' +
       '</div>';
-  }).join('');
+  }).join('') + '</div>';
 }
 
 function updatePhoneEntry(inputEl) {
@@ -1242,7 +1311,7 @@ function bindPhoneForm() {
     e.preventDefault();
     var name = document.getElementById('newPhoneName').value.trim();
     var phone = document.getElementById('newPhoneNumber').value.trim();
-    if (!name || !phone) { showToast('សូមបញ្ចូលទាំងឈ្មោះ និងលេខទូរស័ព្ទ'); return; }
+    if (!name || !phone) { showToast('សូមជ្រើសរើសគ្រូពេទ្យ និងបញ្ចូលលេខទូរស័ព្ទ'); return; }
     STATE.doctorPhones.push({ id: 'ph_' + Date.now(), name: name, phone: phone });
     persistRemoteState();
     renderPhoneDirectory();
@@ -1389,6 +1458,14 @@ function showToast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2200);
 }
+
+function printSchedule() {
+  var sel = document.getElementById('printScaleSelect');
+  var scale = sel ? sel.value : '0.7';
+  document.documentElement.style.setProperty('--print-scale', scale);
+  window.print();
+}
+window.printSchedule = printSchedule;
 
 function showError(err) {
   console.error(err);
