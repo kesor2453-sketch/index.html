@@ -201,6 +201,15 @@
       </div>
       <div id="scheduleWrap"></div>
     </div>
+    <div class="card">
+      <div style="font-weight:700;font-size:15px;margin-bottom:10px;">លេខទូរស័ព្ទគ្រូពេទ្យ</div>
+      <div id="phoneListWrap"></div>
+      <form class="add-doc" id="addPhoneForm">
+        <input type="text" id="newPhoneName" placeholder="ឈ្មោះ">
+        <input type="text" id="newPhoneNumber" placeholder="លេខទូរស័ព្ទ">
+        <button type="submit">+ បន្ថែម</button>
+      </form>
+    </div>
   </div>
 
   <!-- DOCTORS -->
@@ -338,7 +347,9 @@ function enforceMiscLastAllMonths() {
 var STATE = {
   doctors: [],
   scheduleAll: [],
-  columnsByMonth: {}, // { 'YYYY-MM': [ {id,label,type}, ... ] } — each month keeps its own column set
+  columnsByMonth: {}, // { 'YYYY-MM': [ {id,label,type}, ... ] } — each month's actual column set
+  columnsTemplate: null, // the "current standard" column set — seeds any month not yet visited
+  doctorPhones: [], // [{id,name,phone}] — a single shared phone directory, not tied to any month
   unlockedMonths: {}, // { 'YYYY-MM': true } — past months explicitly unlocked for schedule editing
   rates: RATES,
   khrPerUsd: KHR_PER_USD,
@@ -348,14 +359,53 @@ var STATE = {
 };
 
 // Returns (and lazily creates) the column list for a given "YYYY-MM" key.
-// Brand-new months start from a copy of DEFAULT_COLUMNS but are independent
-// from then on — editing/adding/removing columns in one month never touches
-// any other month.
+// A brand-new month starts from a copy of the current template (whatever
+// the most recent add/delete of a column left it as) — so a column change
+// made going forward is what future months pick up automatically.
 function getColumnsForMonth(ym) {
   if (!STATE.columnsByMonth[ym] || !STATE.columnsByMonth[ym].length) {
-    STATE.columnsByMonth[ym] = JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+    var template = (STATE.columnsTemplate && STATE.columnsTemplate.length) ? STATE.columnsTemplate : DEFAULT_COLUMNS;
+    STATE.columnsByMonth[ym] = JSON.parse(JSON.stringify(template));
   }
   return STATE.columnsByMonth[ym];
+}
+
+// Propagates an add/delete of a name-column made while viewing `fromYm`
+// forward: updates the shared template (so any month not yet created will
+// include the change) and every already-materialized month strictly AFTER
+// fromYm (so existing future months stay in sync too). Months at or before
+// fromYm are never touched here — the caller already updated fromYm itself,
+// and past months keep their own historical column set and data untouched.
+// Deleting only removes the column definition going forward; the actual
+// cell values already saved in STATE.scheduleAll are never touched, so no
+// old data is lost.
+function propagateColumnChangeForward(fromYm, action, payload) {
+  if (!STATE.columnsTemplate) STATE.columnsTemplate = JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+  if (action === 'add') {
+    if (!STATE.columnsTemplate.some(function (c) { return c.id === payload.id; })) {
+      var tIdx = STATE.columnsTemplate.findIndex(function (c) { return c.type === 'text'; });
+      var copy = { id: payload.id, label: payload.label, type: payload.type };
+      if (tIdx === -1) STATE.columnsTemplate.push(copy); else STATE.columnsTemplate.splice(tIdx, 0, copy);
+    }
+  } else if (action === 'delete') {
+    STATE.columnsTemplate = STATE.columnsTemplate.filter(function (c) { return c.id !== payload; });
+  }
+  enforceMiscLast(STATE.columnsTemplate);
+
+  Object.keys(STATE.columnsByMonth).forEach(function (ym) {
+    if (ym <= fromYm) return;
+    var cols = STATE.columnsByMonth[ym];
+    if (action === 'add') {
+      if (!cols.some(function (c) { return c.id === payload.id; })) {
+        var idx = cols.findIndex(function (c) { return c.type === 'text'; });
+        var copy2 = { id: payload.id, label: payload.label, type: payload.type };
+        if (idx === -1) cols.push(copy2); else cols.splice(idx, 0, copy2);
+      }
+    } else if (action === 'delete') {
+      STATE.columnsByMonth[ym] = cols.filter(function (c) { return c.id !== payload; });
+    }
+    enforceMiscLast(STATE.columnsByMonth[ym]);
+  });
 }
 function monthKey(y, m) { return y + '-' + pad2(m); }
 function currentScheduleMonthKey() { return monthKey(STATE.year, STATE.month); }
@@ -437,6 +487,7 @@ function seedDefaultDoctors() {
 function persistRemoteState() {
   setDoc(scheduleDocRef, {
     doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columnsByMonth: STATE.columnsByMonth,
+    columnsTemplate: STATE.columnsTemplate, doctorPhones: STATE.doctorPhones,
     unlockedMonths: STATE.unlockedMonths
   }).catch(function (err) {
     showToast('⚠ មិនអាចផ្ញើទៅ Firestore បានទេ៖ ' + err.message);
@@ -449,6 +500,7 @@ document.addEventListener('DOMContentLoaded', function () {
   bindTabs();
   bindMonthNav();
   bindDoctorForm();
+  bindPhoneForm();
   bindManualBackup();
   renderDeviceNameLabel();
 
@@ -467,18 +519,25 @@ document.addEventListener('DOMContentLoaded', function () {
       STATE.doctors = data.doctors || [];
       STATE.scheduleAll = data.scheduleAll || [];
       STATE.columnsByMonth = data.columnsByMonth || {};
+      STATE.columnsTemplate = (data.columnsTemplate && data.columnsTemplate.length)
+        ? data.columnsTemplate : JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+      STATE.doctorPhones = data.doctorPhones || [];
       STATE.unlockedMonths = data.unlockedMonths || {};
       var didMigrate = migrateOldDefaultLabels();
       var didReorder = enforceMiscLastAllMonths();
+      enforceMiscLast(STATE.columnsTemplate);
       if (didMigrate || didReorder) persistRemoteState();
     } else if (!firstSnapshotHandled) {
       STATE.doctors = seedDefaultDoctors();
       STATE.columnsByMonth = {};
+      STATE.columnsTemplate = JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+      STATE.doctorPhones = [];
       persistRemoteState();
     }
     firstSnapshotHandled = true;
     loadSchedule();
     renderDoctors();
+    renderPhoneDirectory();
     if (document.getElementById('panel-payroll').classList.contains('active')) loadPayroll();
     if (document.getElementById('panel-log').classList.contains('active')) loadLog();
   }, function (err) {
@@ -605,6 +664,7 @@ function loadSchedule() {
   renderSchedule();
   refreshMonthPickers();
   renderScheduleLockButton();
+  renderPhoneDirectory();
 }
 
 function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
@@ -772,7 +832,8 @@ function renameColumn(inputEl) {
 window.renameColumn = renameColumn;
 
 function addColumn() {
-  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  var ym = currentScheduleMonthKey();
+  var cols = getColumnsForMonth(ym);
   var nameCols = cols.filter(function (c) { return c.type === 'name'; });
   var label = window.prompt('ឈ្មោះជួរឈរថ្មី៖', 'SPV ' + (nameCols.length + 1));
   if (!label) return;
@@ -787,22 +848,30 @@ function addColumn() {
   } else {
     cols.splice(textIdx, 0, newCol);
   }
+  // A column added going forward should also appear in every later month
+  // (and any month not yet visited), so schedules stay consistent month to
+  // month without having to redo the change each time.
+  propagateColumnChangeForward(ym, 'add', newCol);
   persistRemoteState();
   renderSchedule();
-  showToast('បន្ថែមជួរឈររួចរាល់ ✓ (សម្រាប់តែខែនេះ)');
+  showToast('បន្ថែមជួរឈររួចរាល់ ✓ (និងខែបន្ទាប់ៗទៀត)');
 }
 window.addColumn = addColumn;
 
 function deleteColumn(id) {
-  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  var ym = currentScheduleMonthKey();
+  var cols = getColumnsForMonth(ym);
   if (cols.length <= 1) { showToast('ត្រូវមានយ៉ាងហោចណាស់ ១ជួរឈរ'); return; }
   var col = columnById(id);
   if (!col) return;
-  if (!window.confirm('លុបជួរឈរ "' + col.label + '"? (ចំពោះខែនេះតែប៉ុណ្ណោះ — ទិន្នន័យចាស់ក្នុងជួរនេះនឹងលាក់ ប៉ុន្តែមិនលុបចេញពី Firestore ទេ)')) return;
-  STATE.columnsByMonth[currentScheduleMonthKey()] = cols.filter(function (c) { return c.id !== id; });
+  if (!window.confirm('លុបជួរឈរ "' + col.label + '"? (ខែនេះ និងខែបន្ទាប់ៗទៀតនឹងលាក់ជួរនេះ — ទិន្នន័យចាស់ៗនឹងមិនត្រូវបានលុបចោលទេ)')) return;
+  STATE.columnsByMonth[ym] = cols.filter(function (c) { return c.id !== id; });
+  // A deleted column should also disappear from every later month, but
+  // earlier months and their saved data are left completely untouched.
+  propagateColumnChangeForward(ym, 'delete', id);
   persistRemoteState();
   renderSchedule();
-  showToast('លុបជួរឈររួចរាល់ ✓');
+  showToast('លុបជួរឈររួចរាល់ ✓ (និងខែបន្ទាប់ៗទៀត)');
 }
 window.deleteColumn = deleteColumn;
 
@@ -1025,9 +1094,10 @@ function renderDoctors() {
   grid.innerHTML = STATE.doctors.map(function (d) {
     var name = d.NameSPV;
     if (doctorEditMode) {
-      return '<div class="doc-item">' +
+      return '<div class="doc-item" style="display:flex;align-items:center;gap:6px;">' +
         '<input type="text" class="edit-select doc-name-input" style="width:100%;" ' +
         'value="' + escapeAttr(name) + '" data-id="' + d.ID + '" data-oldname="' + escapeAttr(name) + '">' +
+        '<span class="col-del" title="លុបគ្រូពេទ្យនេះ" onclick="deleteDoctor(\'' + d.ID + '\')">×</span>' +
         '</div>';
     }
     var c = getNameColors(name);
@@ -1035,8 +1105,11 @@ function renderDoctors() {
     var swatchValue = d.color || c.bg || '#ffffff';
     return '<div class="doc-item" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
       '<span class="name" style="font-weight:700;font-size:13.5px;' + badgeStyle + '">' + escapeHtml(name) + '</span>' +
+      '<span style="display:flex;align-items:center;gap:4px;flex-shrink:0;">' +
       '<input type="color" class="doc-color-input" data-id="' + d.ID + '" value="' + swatchValue + '" title="ប្តូរពណ៌ឈ្មោះ" ' +
-      'style="width:28px;height:28px;border:1px solid var(--line);border-radius:6px;padding:0;cursor:pointer;flex-shrink:0;">' +
+      'style="width:28px;height:28px;border:1px solid var(--line);border-radius:6px;padding:0;cursor:pointer;">' +
+      '<span class="col-del" title="លុបគ្រូពេទ្យនេះ" onclick="deleteDoctor(\'' + d.ID + '\')">×</span>' +
+      '</span>' +
       '</div>';
   }).join('');
 
@@ -1053,6 +1126,18 @@ function renderDoctors() {
     });
   });
 }
+
+function deleteDoctor(id) {
+  var doc = STATE.doctors.filter(function (d) { return d.ID === id; })[0];
+  if (!doc) return;
+  if (!window.confirm('លុបគ្រូពេទ្យ "' + doc.NameSPV + '" ចេញពីបញ្ជី? (ការកំណត់វេនចាស់ក្នុងកាលវិភាគនឹងមិនត្រូវបានលុបចោលទេ គ្រាន់តែយកគាត់ចេញពីបញ្ជីគ្រូពេទ្យសម្រាប់ជ្រើសរើសនាពេលក្រោយប៉ុណ្ណោះ)')) return;
+  STATE.doctors = STATE.doctors.filter(function (d) { return d.ID !== id; });
+  persistRemoteState();
+  renderDoctors();
+  renderSchedule();
+  showToast('លុបគ្រូពេទ្យរួចរាល់ ✓');
+}
+window.deleteDoctor = deleteDoctor;
 
 function toggleDoctorEditMode() {
   if (doctorEditMode) {
@@ -1107,6 +1192,76 @@ function bindDoctorForm() {
   });
 }
 
+// ---- Phone directory (លេខទូរស័ព្ទគ្រូពេទ្យ) — shared across every month,
+// shown once below the schedule table. Editable and deletable, independent
+// of which month is currently being viewed.
+function renderPhoneDirectory() {
+  var wrap = document.getElementById('phoneListWrap');
+  if (!wrap) return;
+  if (!STATE.doctorPhones.length) {
+    wrap.innerHTML = '<div class="empty-state" style="padding:10px 0;">មិនទាន់មានលេខទូរស័ព្ទទេ</div>';
+    return;
+  }
+  wrap.innerHTML = STATE.doctorPhones.map(function (p) {
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+      '<input type="text" class="edit-select" style="flex:1;" value="' + escapeAttr(p.name) +
+      '" data-id="' + p.id + '" data-field="name" onchange="updatePhoneEntry(this)">' +
+      '<input type="text" class="edit-select" style="flex:1;" value="' + escapeAttr(p.phone) +
+      '" data-id="' + p.id + '" data-field="phone" onchange="updatePhoneEntry(this)">' +
+      '<span class="col-del" title="លុប" onclick="deletePhoneEntry(\'' + p.id + '\')">×</span>' +
+      '</div>';
+  }).join('');
+}
+
+function updatePhoneEntry(inputEl) {
+  var id = inputEl.dataset.id;
+  var field = inputEl.dataset.field;
+  var entry = STATE.doctorPhones.filter(function (p) { return p.id === id; })[0];
+  if (!entry) return;
+  entry[field] = inputEl.value.trim();
+  persistRemoteState();
+  showToast('រក្សាទុករួចរាល់ ✓');
+}
+window.updatePhoneEntry = updatePhoneEntry;
+
+function deletePhoneEntry(id) {
+  var entry = STATE.doctorPhones.filter(function (p) { return p.id === id; })[0];
+  if (!entry) return;
+  if (!window.confirm('លុបលេខទូរស័ព្ទរបស់ "' + entry.name + '"?')) return;
+  STATE.doctorPhones = STATE.doctorPhones.filter(function (p) { return p.id !== id; });
+  persistRemoteState();
+  renderPhoneDirectory();
+  showToast('លុបរួចរាល់ ✓');
+}
+window.deletePhoneEntry = deletePhoneEntry;
+
+function bindPhoneForm() {
+  var form = document.getElementById('addPhoneForm');
+  if (!form) return;
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var name = document.getElementById('newPhoneName').value.trim();
+    var phone = document.getElementById('newPhoneNumber').value.trim();
+    if (!name || !phone) { showToast('សូមបញ្ចូលទាំងឈ្មោះ និងលេខទូរស័ព្ទ'); return; }
+    STATE.doctorPhones.push({ id: 'ph_' + Date.now(), name: name, phone: phone });
+    persistRemoteState();
+    renderPhoneDirectory();
+    showToast('បន្ថែមលេខទូរស័ព្ទរួចរាល់ ✓');
+    form.reset();
+  });
+}
+
+// A schedule cell may hold a name plus a trailing time note in parentheses,
+// e.g. "Dr.ka seyla (9am-12am)" or "Dr.ka seyla(16pm-19pm)". For payroll
+// purposes that's still the same doctor, so strip anything from the first
+// "(" onward (and trim) before matching/grouping — the two entries then
+// count as one person's shifts, summed together.
+function baseDoctorName(name) {
+  if (!name) return name;
+  var idx = String(name).indexOf('(');
+  return (idx === -1 ? name : name.slice(0, idx)).trim();
+}
+
 function computePayrollClient(year, month) {
   var prefix = year + '-' + pad2(month);
   var rows = STATE.scheduleAll.filter(function (r) { return String(r.Date).indexOf(prefix) === 0; });
@@ -1115,7 +1270,9 @@ function computePayrollClient(year, month) {
 
   rows.forEach(function (r) {
     nameCols.forEach(function (col) {
-      var name = r[col.id];
+      var rawName = r[col.id];
+      if (!rawName) return;
+      var name = baseDoctorName(rawName);
       if (!name) return;
       var doc = findDoctorByNameClient(name);
       var key = doc ? doc.ID : name;
