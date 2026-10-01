@@ -212,7 +212,8 @@
           <select class="today-btn" id="monthPicker" style="cursor:pointer;"></select>
           <button type="button" class="today-btn complete-btn" id="unlockScheduleBtn" onclick="toggleScheduleLock()" style="display:none;"></button>
         </div>
-        <div class="no-print">
+        <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button type="button" class="today-btn" id="copyScheduleBtn" onclick="copySchedule()">📋 ចម្លង</button>
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
         </div>
       </div>
@@ -1460,6 +1461,24 @@ function showToast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2200);
 }
+
+// Copies the whole visible month as tab-separated text (pastes as a table
+// into Google Sheets, Telegram, Notes, etc.).
+function copySchedule() {
+  var y = STATE.year, m = STATE.month, n = daysInMonth(y, m);
+  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  var lines = [['Date'].concat(cols.map(function (c) { return c.label; })).join('\t')];
+  for (var d = 1; d <= n; d++) {
+    var row = rowForDate(y + '-' + pad2(m) + '-' + pad2(d)) || {};
+    lines.push([d + '/' + pad2(m)].concat(cols.map(function (c) {
+      return String(row[c.id] || '').replace(/[\t\r\n]+/g, ' ');
+    })).join('\t'));
+  }
+  navigator.clipboard.writeText(lines.join('\n'))
+    .then(function () { showToast('ចម្លងកាលវិភាគរួចរាល់ ✓'); })
+    .catch(function () { showToast('មិនអាចចម្លងបានទេ'); });
+}
+window.copySchedule = copySchedule;
 
 function printSchedule() {
   window.print();
