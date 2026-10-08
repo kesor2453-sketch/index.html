@@ -984,27 +984,78 @@ function harvestNames(fields) {
   return Object.keys(set).sort();
 }
 
-// ទិសដៅលោតស្វ័យប្រវត្តិ៖ 'down' = ថ្ងៃបន្ទាប់ក្នុងជួរឈរដដែល, 'right' = ជួរឈរបន្ទាប់ក្នុងថ្ងៃដដែល
-var AUTO_JUMP_DIRECTION = 'down';
+// ទិសដៅលោតស្វ័យប្រវត្តិ (ពេលចុច Enter ឬពេលជ្រើស/វាយឈ្មោះគ្រូពេទ្យរួច)៖
+//   'right' = ជួរឈរបន្ទាប់ក្នុងថ្ងៃដដែល,  'down' = ថ្ងៃបន្ទាប់ក្នុងជួរឈរដដែល
+var AUTO_JUMP_DIRECTION = 'right';
 
-function openNextCell(date, field) {
+// រកក្រឡាជិតខាង តាមទិស up / down / left / right
+function neighborCell(date, field, dir) {
+  var p = date.split('-');
+  var y = Number(p[0]), m = Number(p[1]), d = Number(p[2]);
   var nextDate = date, nextField = field;
-  if (AUTO_JUMP_DIRECTION === 'right') {
+  if (dir === 'down' || dir === 'up') {
+    d += (dir === 'down') ? 1 : -1;
+    if (d < 1 || d > daysInMonth(y, m)) return null;
+    nextDate = y + '-' + pad2(m) + '-' + pad2(d);
+  } else {
     var cols = getColumnsForMonth(currentScheduleMonthKey());
     var idx = cols.findIndex(function (c) { return c.id === field; });
-    if (idx === -1 || idx >= cols.length - 1) return;
-    nextField = cols[idx + 1].id;
-  } else {
-    var p = date.split('-');
-    var y = Number(p[0]), m = Number(p[1]), d = Number(p[2]);
-    if (d >= daysInMonth(y, m)) return; // ចប់ខែ
-    nextDate = y + '-' + pad2(m) + '-' + pad2(d + 1);
+    idx += (dir === 'right') ? 1 : -1;
+    if (idx < 0 || idx >= cols.length) return null;
+    nextField = cols[idx].id;
   }
-  var next = document.querySelector('.cell-slot[data-date="' + nextDate + '"][data-field="' + nextField + '"]');
+  return document.querySelector('.cell-slot[data-date="' + nextDate + '"][data-field="' + nextField + '"]');
+}
+
+function openCellInDirection(date, field, dir) {
+  var next = neighborCell(date, field, dir);
   if (next) {
-    next.scrollIntoView({ block: 'nearest' });
+    next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     openEditor(next);
   }
+}
+
+// ភ្ជាប់ keyboard ទៅប្រអប់វាយ៖
+//   Enter ........ រក្សាទុក + លោតតាម AUTO_JUMP_DIRECTION
+//   ↑ ↓ .......... រក្សាទុក + លោតលើ / ក្រោម
+//   ← → .......... រក្សាទុក + លោតឆ្វេង / ស្ដាំ (តែពេល cursor នៅដើម / ចុងអក្សរ — បើមិនដូច្នោះ ព្រួញរំកិល cursor ធម្មតា)
+//   Tab / Shift+Tab  ស្ដាំ / ឆ្វេង
+//   Esc .......... បោះបង់
+function wireEditorInput(input, cell, date, field, currentVal, onInputExtra) {
+  var finished = false;
+  function finish(cancel, dir) {
+    if (finished) return;
+    finished = true;
+    STATE.editing = null;
+    cell.style.display = '';
+    if (cancel) { renderSchedule(); return; }
+    var newVal = input.value.trim();
+    var ok = true;
+    if (newVal === currentVal) renderSchedule();
+    else ok = saveCellValue(date, field, newVal);
+    if (dir && ok !== false) openCellInDirection(date, field, dir);
+  }
+  input.addEventListener('keydown', function (e) {
+    if (e.isComposing || e.keyCode === 229) return; // កំពុងវាយអក្សរខ្មែរ (IME)
+    var len = input.value.length;
+    var selStart = input.selectionStart, selEnd = input.selectionEnd;
+    if (e.key === 'Enter') { e.preventDefault(); finish(false, AUTO_JUMP_DIRECTION); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); finish(false, 'down'); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); finish(false, 'up'); }
+    else if (e.key === 'ArrowRight' && !e.shiftKey && selEnd === len) { e.preventDefault(); finish(false, 'right'); }
+    else if (e.key === 'ArrowLeft' && !e.shiftKey && selStart === 0) { e.preventDefault(); finish(false, 'left'); }
+    else if (e.key === 'Tab') { e.preventDefault(); finish(false, e.shiftKey ? 'left' : 'right'); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(true, null); }
+  });
+  if (onInputExtra) {
+    input.addEventListener('input', function (e) {
+      if (e.isComposing) return;
+      if (onInputExtra(e)) finish(false, AUTO_JUMP_DIRECTION);
+    });
+  }
+  input.addEventListener('blur', function () {
+    setTimeout(function () { finish(false, null); }, 80);
+  });
 }
 
 function openEditor(cell) {
@@ -1017,9 +1068,6 @@ function openEditor(cell) {
   var field = cell.dataset.field;
   var currentVal = cell.dataset.value;
   STATE.editing = { date: date, field: field };
-
-  var moveNext = false;   // Enter / ↓ → បើកក្រឡាបន្ទាប់
-  var committed = false;  // ការពារ commit ពីរដង
 
   var col = columnById(field);
   if (col && col.type === 'text') {
@@ -1035,30 +1083,7 @@ function openEditor(cell) {
     cell.appendChild(textInput);
     textInput.focus();
     textInput.select();
-
-    function commitText() {
-      if (committed) return;
-      committed = true;
-      var newVal = textInput.value.trim();
-      STATE.editing = null;
-      cell.style.display = '';
-      var ok = true;
-      if (newVal === currentVal) { renderSchedule(); }
-      else { ok = saveCellValue(date, field, newVal); }
-      if (moveNext && ok !== false) openNextCell(date, field);
-    }
-    textInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === 'ArrowDown') {
-        e.preventDefault();
-        moveNext = true;
-        textInput.blur();
-      }
-      if (e.key === 'Escape') {
-        committed = true;
-        STATE.editing = null; cell.style.display = ''; renderSchedule();
-      }
-    });
-    textInput.addEventListener('blur', function () { setTimeout(commitText, 80); });
+    wireEditorInput(textInput, cell, date, field, currentVal, null);
     return;
   }
 
@@ -1094,39 +1119,15 @@ function openEditor(cell) {
   nameInput.focus();
   nameInput.select();
 
-  function commitName() {
-    if (committed) return;
-    committed = true;
-    var newVal = nameInput.value.trim();
-    STATE.editing = null;
-    cell.style.display = '';
-    var ok = true;
-    if (newVal === currentVal) { renderSchedule(); }
-    else { ok = saveCellValue(date, field, newVal); }
-    if (moveNext && ok !== false) openNextCell(date, field);
-  }
-  nameInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveNext = true;
-      nameInput.blur();
-    }
-    if (e.key === 'Escape') {
-      committed = true;
-      STATE.editing = null; cell.style.display = ''; renderSchedule();
-    }
-  });
   // លោតស្វ័យប្រវត្តិ៖ ពេលជ្រើសឈ្មោះពីបញ្ជីណែនាំ ឬវាយឈ្មោះគ្រូពេទ្យត្រូវនឹងបញ្ជីពេញលេញ
-  nameInput.addEventListener('input', function (e) {
-    if (e.isComposing) return;
+  wireEditorInput(nameInput, cell, date, field, currentVal, function (e) {
     var v = nameInput.value.trim();
-    if (!v) return;
+    if (!v) return false;
     var fromList = !e.inputType || e.inputType === 'insertReplacementText';
     var exact = suggestions.indexOf(v) !== -1 &&
       !suggestions.some(function (x) { return x !== v && x.indexOf(v) === 0; });
-    if (fromList || exact) { moveNext = true; nameInput.blur(); }
+    return fromList || exact;
   });
-  nameInput.addEventListener('blur', function () { setTimeout(commitName, 80); });
 }
 
 function saveCellValue(date, field, value) {
