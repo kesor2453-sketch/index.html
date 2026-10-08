@@ -213,7 +213,6 @@
           <button type="button" class="today-btn complete-btn" id="unlockScheduleBtn" onclick="toggleScheduleLock()" style="display:none;"></button>
         </div>
         <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button type="button" class="today-btn" id="copyScheduleBtn" onclick="copySchedule()">📋 ចម្លង</button>
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
         </div>
       </div>
@@ -561,7 +560,7 @@ document.addEventListener('DOMContentLoaded', function () {
       persistRemoteState();
     }
     firstSnapshotHandled = true;
-    loadSchedule();
+    if (!STATE.editing) loadSchedule();
     renderDoctors();
     renderPhoneDirectory();
     if (document.getElementById('panel-payroll').classList.contains('active')) loadPayroll();
@@ -703,9 +702,13 @@ function rowForDate(dateStr) {
   return null;
 }
 
+function normName(name) {
+  return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
 function findDoctorByNameClient(name) {
   if (!name) return null;
-  return STATE.doctors.filter(function (d) { return d.NameSPV === name; })[0] || null;
+  var n = normName(name);
+  return STATE.doctors.filter(function (d) { return normName(d.NameSPV) === n; })[0] || null;
 }
 
 function rowIsAutoOff(rowObj, cols) {
@@ -981,6 +984,29 @@ function harvestNames(fields) {
   return Object.keys(set).sort();
 }
 
+// ទិសដៅលោតស្វ័យប្រវត្តិ៖ 'down' = ថ្ងៃបន្ទាប់ក្នុងជួរឈរដដែល, 'right' = ជួរឈរបន្ទាប់ក្នុងថ្ងៃដដែល
+var AUTO_JUMP_DIRECTION = 'down';
+
+function openNextCell(date, field) {
+  var nextDate = date, nextField = field;
+  if (AUTO_JUMP_DIRECTION === 'right') {
+    var cols = getColumnsForMonth(currentScheduleMonthKey());
+    var idx = cols.findIndex(function (c) { return c.id === field; });
+    if (idx === -1 || idx >= cols.length - 1) return;
+    nextField = cols[idx + 1].id;
+  } else {
+    var p = date.split('-');
+    var y = Number(p[0]), m = Number(p[1]), d = Number(p[2]);
+    if (d >= daysInMonth(y, m)) return; // ចប់ខែ
+    nextDate = y + '-' + pad2(m) + '-' + pad2(d + 1);
+  }
+  var next = document.querySelector('.cell-slot[data-date="' + nextDate + '"][data-field="' + nextField + '"]');
+  if (next) {
+    next.scrollIntoView({ block: 'nearest' });
+    openEditor(next);
+  }
+}
+
 function openEditor(cell) {
   if (STATE.editing) return;
   if (scheduleMonthLocked()) {
@@ -992,9 +1018,11 @@ function openEditor(cell) {
   var currentVal = cell.dataset.value;
   STATE.editing = { date: date, field: field };
 
+  var moveNext = false;   // Enter / ↓ → បើកក្រឡាបន្ទាប់
+  var committed = false;  // ការពារ commit ពីរដង
+
   var col = columnById(field);
   if (col && col.type === 'text') {
-    // Free-text only — no dropdown/suggestions for this column.
     var textInput = document.createElement('input');
     textInput.type = 'text';
     textInput.className = 'edit-select';
@@ -1009,21 +1037,32 @@ function openEditor(cell) {
     textInput.select();
 
     function commitText() {
+      if (committed) return;
+      committed = true;
       var newVal = textInput.value.trim();
       STATE.editing = null;
       cell.style.display = '';
-      if (newVal === currentVal) { renderSchedule(); return; }
-      saveCellValue(date, field, newVal);
+      var ok = true;
+      if (newVal === currentVal) { renderSchedule(); }
+      else { ok = saveCellValue(date, field, newVal); }
+      if (moveNext && ok !== false) openNextCell(date, field);
     }
     textInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { textInput.blur(); }
-      if (e.key === 'Escape') { STATE.editing = null; cell.style.display = ''; renderSchedule(); }
+      if (e.key === 'Enter' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        moveNext = true;
+        textInput.blur();
+      }
+      if (e.key === 'Escape') {
+        committed = true;
+        STATE.editing = null; cell.style.display = ''; renderSchedule();
+      }
     });
     textInput.addEventListener('blur', function () { setTimeout(commitText, 80); });
     return;
   }
 
-  // Name-type columns — free text with suggestions (type to search, or type a new name).
+  // ជួរឈរឈ្មោះ
   var poolFields = getColumnsForMonth(currentScheduleMonthKey()).filter(function (c) { return c.type === 'name'; }).map(function (c) { return c.id; });
   var fromDoctors = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
   var fromHistory = harvestNames(poolFields);
@@ -1056,15 +1095,36 @@ function openEditor(cell) {
   nameInput.select();
 
   function commitName() {
+    if (committed) return;
+    committed = true;
     var newVal = nameInput.value.trim();
     STATE.editing = null;
     cell.style.display = '';
-    if (newVal === currentVal) { renderSchedule(); return; }
-    saveCellValue(date, field, newVal);
+    var ok = true;
+    if (newVal === currentVal) { renderSchedule(); }
+    else { ok = saveCellValue(date, field, newVal); }
+    if (moveNext && ok !== false) openNextCell(date, field);
   }
   nameInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { nameInput.blur(); }
-    if (e.key === 'Escape') { STATE.editing = null; cell.style.display = ''; renderSchedule(); }
+    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveNext = true;
+      nameInput.blur();
+    }
+    if (e.key === 'Escape') {
+      committed = true;
+      STATE.editing = null; cell.style.display = ''; renderSchedule();
+    }
+  });
+  // លោតស្វ័យប្រវត្តិ៖ ពេលជ្រើសឈ្មោះពីបញ្ជីណែនាំ ឬវាយឈ្មោះគ្រូពេទ្យត្រូវនឹងបញ្ជីពេញលេញ
+  nameInput.addEventListener('input', function (e) {
+    if (e.isComposing) return;
+    var v = nameInput.value.trim();
+    if (!v) return;
+    var fromList = !e.inputType || e.inputType === 'insertReplacementText';
+    var exact = suggestions.indexOf(v) !== -1 &&
+      !suggestions.some(function (x) { return x !== v && x.indexOf(v) === 0; });
+    if (fromList || exact) { moveNext = true; nameInput.blur(); }
   });
   nameInput.addEventListener('blur', function () { setTimeout(commitName, 80); });
 }
@@ -1083,7 +1143,7 @@ function saveCellValue(date, field, value) {
       if (dup) {
         showToast('⚠ ' + value + ' មានរួចហើយក្នុងក្រុម "' + col.label + '" ថ្ងៃនេះ — មិនអាចដាក់ស្ទួនបានទេ');
         renderSchedule();
-        return;
+        return false;
       }
     }
   }
@@ -1104,6 +1164,7 @@ function saveCellValue(date, field, value) {
 
   persistRemoteState();
   scheduleBackup();
+  return true;
 }
 
 var doctorEditMode = false;
@@ -1347,7 +1408,7 @@ function computePayrollClient(year, month) {
       var name = baseDoctorName(rawName);
       if (!name) return;
       var doc = findDoctorByNameClient(name);
-      var key = doc ? doc.ID : name;
+      var key = doc ? doc.ID : normName(name);
       var displayName = doc ? doc.NameSPV : name;
       if (!spvCounts[key]) spvCounts[key] = { name: displayName, dayShifts: 0, nightShifts: 0, shifts: 0 };
       // Classify purely by whether the column's current header TEXT contains
@@ -1461,24 +1522,6 @@ function showToast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2200);
 }
-
-// Copies the whole visible month as tab-separated text (pastes as a table
-// into Google Sheets, Telegram, Notes, etc.).
-function copySchedule() {
-  var y = STATE.year, m = STATE.month, n = daysInMonth(y, m);
-  var cols = getColumnsForMonth(currentScheduleMonthKey());
-  var lines = [['Date'].concat(cols.map(function (c) { return c.label; })).join('\t')];
-  for (var d = 1; d <= n; d++) {
-    var row = rowForDate(y + '-' + pad2(m) + '-' + pad2(d)) || {};
-    lines.push([d + '/' + pad2(m)].concat(cols.map(function (c) {
-      return String(row[c.id] || '').replace(/[\t\r\n]+/g, ' ');
-    })).join('\t'));
-  }
-  navigator.clipboard.writeText(lines.join('\n'))
-    .then(function () { showToast('ចម្លងកាលវិភាគរួចរាល់ ✓'); })
-    .catch(function () { showToast('មិនអាចចម្លងបានទេ'); });
-}
-window.copySchedule = copySchedule;
 
 function printSchedule() {
   window.print();
