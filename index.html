@@ -135,6 +135,25 @@
   }
   .slot-add:hover{background:var(--spv-bg);border-color:var(--brand);}
   table.sched td.text-col{vertical-align:top;}
+  /* ====== រចនាសម្ព័ន្ធតារាងថ្មី (ឈ្មោះជា chip, ព្រឹក/យប់ ទទឹងស្មើគ្នា) ====== */
+  .sched-box{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff;}
+  .sched-bar{display:flex;align-items:center;justify-content:space-between;background:var(--brand);color:#fff;padding:9px 14px;font-weight:700;font-size:14px;}
+  .sched-bar button{border:none;background:rgba(255,255,255,.22);color:#fff;border-radius:999px;padding:5px 12px;font-family:inherit;font-weight:600;font-size:12px;cursor:pointer;}
+  .sched-bar button:hover{background:rgba(255,255,255,.34);}
+  table.sched thead th{font-size:14px;padding:11px 6px;color:#555f6e;}
+  table.sched thead th.group-spv{color:#555f6e;}
+  table.sched tbody td{padding:5px 8px;border-bottom:1px solid var(--line);}
+  table.sched tbody td.date-cell{width:118px;min-width:118px;font-size:12.5px;padding-left:10px !important;}
+  td.date-cell .dow{display:inline;margin-left:4px;font-size:11px;}
+  table.sched tbody tr.weekend{background:#fdeaea;}
+  table.sched tbody tr.weekend td.date-cell{background:#f28b8b;color:#fff;}
+  table.sched tbody tr.weekend td.date-cell .dow{color:#fff;}
+  table.sched tbody tr.today td.date-cell{background:#ffe27a;color:#1c2430;}
+  .grp-cell{justify-content:flex-start;gap:6px;}
+  .grp-cell .cell-slot{min-height:36px;border-radius:10px;padding:9px 10px;font-weight:600;font-size:13px;box-shadow:0 1px 3px rgba(20,25,40,.12);display:flex;align-items:center;justify-content:center;}
+  .grp-cell .cell-slot.empty{box-shadow:none;}
+  .grp-cell .cell-slot.plus, .grp-cell .slot-add{border-radius:10px;}
+  .grp-cell .slot-add{min-height:36px;}
   select.edit-select, input.edit-select{
     width:100%;font-size:12px;padding:5px;border-radius:7px;border:1px solid var(--brand);
     font-family:inherit;
@@ -190,10 +209,11 @@
     header.top, .tabs, .toast{ display:none !important; }
     .panel{ display:none !important; }
     .panel.active{ display:block !important; }
-    .no-print{ display:none !important; }
+    .no-print, .sched-bar{ display:none !important; }
+    .sched-box{ border:none !important; border-radius:0 !important; }
     #panel-schedule > .card:nth-of-type(2){ display:none !important; } /* phone list not printed */
     .card{ box-shadow:none !important; padding:0 !important; margin:0 !important; border-radius:0 !important; }
-    #scheduleWrap > div{ overflow: visible !important; }
+    #scheduleWrap > div, .sched-box > div{ overflow: visible !important; }
     table.sched thead th{ position:static !important; }
     .col-add, .col-move, .col-del{ display:none !important; }
     .cell-slot.plus, .slot-add{ visibility:hidden !important; }
@@ -859,6 +879,7 @@ function renderSchedule() {
   var groups = nameGroups(cols);
   var textCols = cols.filter(function (c) { return c.type === 'text'; });
   var slotW = computeSlotWidth(cols, y, m);
+  var gw = Math.floor(78 / Math.max(1, groups.length));
 
   var headerCells = groups.map(function (g) {
     var inner;
@@ -872,7 +893,7 @@ function renderSchedule() {
     } else {
       inner = escapeHtml(g.label);
     }
-    return '<th class="group-spv" style="padding:2px;">' + inner + '</th>';
+    return '<th class="group-spv" style="padding:2px;width:' + gw + '%;">' + inner + '</th>';
   }).join('') + textCols.map(function (c) {
     var inner;
     if (headerEditMode) {
@@ -892,11 +913,11 @@ function renderSchedule() {
     html += '<div style="background:var(--off-bg);color:#a52323;border-radius:10px;padding:9px 13px;font-size:12.5px;margin-bottom:12px;font-weight:600;">' +
       '🔒 ខែនេះបានបញ្ចប់ហើយ និងត្រូវបានចាក់សោ — ចុច "🔓 កែប្រែខែនេះ" ខាងលើដើម្បីអនុញ្ញាតឲ្យកែ</div>';
   }
-  html += '<div style="overflow-x:auto;"><table class="sched" style="--slot-w:' + slotW + 'px;"><thead><tr>' +
-    '<th style="text-align:left;">កាលបរិច្ឆេទ</th>' + headerCells +
-    '<th style="width:60px;white-space:nowrap;">' +
-    '<span class="col-add" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ" onclick="toggleHeaderEditMode()">✎</span>' +
-    '</th>' +
+  html += '<div class="sched-box">' +
+    '<div class="sched-bar"><span>🩺 គ្រូពេទ្យ</span>' +
+    '<button type="button" onclick="toggleHeaderEditMode()">' + (headerEditMode ? '✅ រួចរាល់' : '✏️ កែប្រែ') + '</button></div>' +
+    '<div style="overflow-x:auto;"><table class="sched" style="--slot-w:' + slotW + 'px;"><thead><tr>' +
+    '<th style="text-align:left;width:118px;">ថ្ងៃ</th>' + headerCells +
     '</tr></thead><tbody>';
 
   for (var d = 1; d <= nDays; d++) {
@@ -919,10 +940,9 @@ function renderSchedule() {
 
     groups.forEach(function (g) { html += renderGroupCell(dateStr, g, row); });
     textCols.forEach(function (c) { html += renderOffCell(dateStr, c.id, row[c.id], locked); });
-    html += '<td></td>';
     html += '</tr>';
   }
-  html += '</tbody></table></div>';
+  html += '</tbody></table></div></div>';
   document.getElementById('scheduleWrap').innerHTML = html;
 
   bindCellClicks();
