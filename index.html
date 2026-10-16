@@ -393,6 +393,14 @@ function migrateOldDefaultLabels() {
       }
     });
   });
+  // ស្តារជួរ SPV_Night ឲ្យត្រឡប់ជា "យប់" វិញ (បើធ្លាប់ត្រូវបានប្តូរទៅ ព្រឹក)
+  var lists = Object.keys(STATE.columnsByMonth).map(function (k) { return STATE.columnsByMonth[k]; });
+  if (STATE.columnsTemplate) lists.push(STATE.columnsTemplate);
+  lists.forEach(function (cols) {
+    cols.forEach(function (c) {
+      if (c.type === 'name' && c.id === 'SPV_Night' && c.label !== 'យប់') { c.label = 'យប់'; changed = true; }
+    });
+  });
   return changed;
 }
 
