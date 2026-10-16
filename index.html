@@ -142,7 +142,7 @@
   table.sched thead th{font-size:14px;padding:11px 6px;color:#555f6e;}
   table.sched thead th.group-spv{color:#555f6e;}
   table.sched tbody td{padding:5px 8px;border-bottom:1px solid var(--line);}
-  table.sched tbody td.date-cell{width:25%;min-width:118px;font-size:12.5px;padding-left:10px !important;}
+  table.sched tbody td.date-cell{width:118px;min-width:118px;font-size:12.5px;padding-left:10px !important;}
   td.date-cell .dow{display:inline;margin-left:4px;font-size:11px;}
   table.sched tbody tr.weekend{background:#fdeaea;}
   table.sched tbody tr.weekend td.date-cell{background:#f28b8b;color:#fff;}
@@ -170,7 +170,7 @@
   table.sched.edit-on .hdr-add{display:inline-block;}
   table.sched.edit-on .grp-cell .cell-slot.first-empty{display:none;}
   .grp-cell .cell-slot.slot-box, .grp-cell .cell-ph{width:var(--slot-w,120px);min-height:34px;border-radius:10px;border:1px dashed #c3cad6;background:#fff;box-shadow:none;box-sizing:border-box;cursor:pointer;flex-shrink:0;}
-  .grp-cell .cell-slot, .grp-cell .cell-ph{flex:1 1 0;max-width:var(--slot-w,120px);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+  .grp-cell .cell-slot, .grp-cell .cell-ph{flex:0 0 var(--slot-w,120px);width:var(--slot-w,120px);max-width:var(--slot-w,120px);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
   .grp-cell{min-width:0;}
   .grp-cell .cell-slot.slot-box:hover, .grp-cell .cell-ph:hover{background:var(--spv-bg);border-color:var(--brand);}
   .sched-hint{color:var(--sub);font-size:12px;margin:0 2px 8px;}
@@ -919,6 +919,11 @@ function groupAddClick(label, dateStr, firstEmptyId) {
   }
 }
 window.groupAddClick = groupAddClick;
+var _rzT = null;
+window.addEventListener('resize', function () {
+  clearTimeout(_rzT);
+  _rzT = setTimeout(function () { if (!STATE.editing && document.getElementById('scheduleWrap')) { try { renderSchedule(); } catch (e) {} } }, 250);
+});
 
 // ពេលគ្រប់ប្រអប់ក្នុងក្រុមពេញ → បង្កើតជួរថ្មីក្នុងក្រុមដដែល (ព្រឹក ឬ យប់) ហើយបើកវាយភ្លាម
 function addDoctorSlot(label, dateStr) {
@@ -1024,10 +1029,26 @@ function renderSchedule() {
   var groups = nameGroups(cols);
   var textCols = cols.filter(function (c) { return c.type === 'text'; });
   var slotW = computeSlotWidth(cols, y, m);
-  var gw = Math.floor(75 / Math.max(1, groups.length));
+  // ឲ្យឃើញទាំងអស់ក្នុងទំព័រតែមួយ៖ បង្រួមទទឹងប្រអប់ (ស្មើគ្នាទាំងអស់) បើវែងលើសទទឹងអេក្រង់
+  (function () {
+    var wrapEl = document.getElementById('scheduleWrap');
+    var W = wrapEl ? wrapEl.clientWidth : 0;
+    if (!W) return;
+    var gs = nameGroups(cols), nSum = 0;
+    gs.forEach(function (g) {
+      var n = g.cols.length;
+      if (editModeOn()) n = Math.max(n, minBoxesForLabel(g.label));
+      nSum += Math.max(1, n);
+    });
+    var textW = cols.filter(function (c) { return c.type === 'text'; }).length * 130;
+    var avail = (W - 4 - 118 - textW - 28 * gs.length - 6 * nSum) / Math.max(1, nSum);
+    var fit = Math.floor(avail);
+    if (fit < slotW) slotW = Math.max(56, fit);
+  })();
+  var gw = 0;
 
   var headerCells = groups.map(function (g) {
-    return '<th class="group-spv" style="padding:2px;width:' + gw + '%;">' + escapeHtml(g.label) + '</th>';
+    return '<th class="group-spv" style="padding:2px;">' + escapeHtml(g.label) + '</th>';
   }).join('') + textCols.map(function (c) {
     return '<th class="group-spv" style="padding:2px;">' + escapeHtml(c.label) + '</th>';
   }).join('');
