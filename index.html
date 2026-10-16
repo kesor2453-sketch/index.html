@@ -164,7 +164,7 @@
   table.sched.edit-on .add-circle.add-wait{display:none;}
   table.sched.edit-on .grp-cell .cell-slot.first-empty{display:none;}
   .grp-cell .cell-slot.slot-box, .grp-cell .cell-ph{width:var(--slot-w,120px);min-height:34px;border-radius:10px;border:1px dashed #c3cad6;background:#fff;box-shadow:none;box-sizing:border-box;cursor:pointer;flex-shrink:0;}
-  .grp-cell .cell-slot, .grp-cell .cell-ph{flex:0 1 var(--slot-w,120px);min-width:60px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+  .grp-cell .cell-slot, .grp-cell .cell-ph{flex:1 1 0;max-width:var(--slot-w,120px);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
   .grp-cell{min-width:0;}
   .grp-cell .cell-slot.slot-box:hover, .grp-cell .cell-ph:hover{background:var(--spv-bg);border-color:var(--brand);}
   .sched-hint{color:var(--sub);font-size:12px;margin:0 2px 8px;}
