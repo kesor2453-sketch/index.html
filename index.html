@@ -121,11 +121,14 @@
   .cell-slot.off{background:var(--off-bg);color:#a52323;font-weight:600;}
 
   /* ក្រុមជួរឈរ (ព្រឹក / យប់) — ឈ្មោះគ្រូពេទ្យច្រើននាក់ដាក់ជួរតាមបណ្តោយ ទំហំស្មើគ្នា */
-  .grp-cell{display:flex;flex-direction:column;gap:3px;align-items:center;}
+  .grp-cell{display:flex;flex-direction:row;flex-wrap:nowrap;gap:3px;align-items:center;justify-content:center;}
   .grp-cell .cell-slot{width:var(--slot-w,120px);text-align:center;}
   .cell-slot.plus{border:1px dashed var(--line);color:var(--brand);font-weight:700;background:transparent;}
   .cell-slot.plus:hover{background:var(--spv-bg);border-color:var(--brand);}
   .cell-slot.slot-hidden{display:none;}
+  .grp-cell .cell-slot.plus, .grp-cell .slot-add{display:none;}
+  .grp-cell.editing .cell-slot.plus, .grp-cell.editing .slot-add{display:block;}
+  .grp-cell .cell-slot.first-empty{color:#c3c9d3;}
   .slot-add{
     width:var(--slot-w,120px);min-height:26px;border:1px dashed var(--line);border-radius:8px;
     color:var(--brand);font-weight:700;cursor:pointer;text-align:center;padding:3px 0;font-size:13px;
@@ -771,8 +774,11 @@ function computeSlotWidth(cols, y, m) {
 }
 
 function renderGroupCell(dateStr, group, row) {
-  var firstEmptyId = null;
-  group.cols.forEach(function (c) { if (!firstEmptyId && !row[c.id]) firstEmptyId = c.id; });
+  var firstEmptyId = null, filledCount = 0;
+  group.cols.forEach(function (c) {
+    if (row[c.id]) filledCount++;
+    else if (!firstEmptyId) firstEmptyId = c.id;
+  });
   var html = '<td style="vertical-align:top;"><div class="grp-cell">';
   group.cols.forEach(function (c) {
     var v = row[c.id];
@@ -780,13 +786,15 @@ function renderGroupCell(dateStr, group, row) {
     if (v) {
       html += '<div class="cell-slot spv" style="' + styleFor(v) + '"' + attrs + '>' + escapeHtml(v) + '</div>';
     } else if (c.id === firstEmptyId) {
-      html += '<div class="cell-slot empty plus" title="បន្ថែមគ្រូពេទ្យ"' + attrs + '>+</div>';
+      // ក្រុមទទេ → បង្ហាញ "—" ជានិច្ច (ចុចដើម្បីវាយ); មានគ្រូពេទ្យហើយ → បង្ហាញ + តែពេលកំពុងកែ
+      if (filledCount === 0) html += '<div class="cell-slot empty first-empty"' + attrs + '>—</div>';
+      else html += '<div class="cell-slot empty plus" title="បន្ថែមគ្រូពេទ្យ"' + attrs + '>+</div>';
     } else {
       html += '<div class="cell-slot empty slot-hidden"' + attrs + '></div>';
     }
   });
   if (!firstEmptyId) {
-    html += '<div class="slot-add" title="បន្ថែមគ្រូពេទ្យម្នាក់ទៀត" onclick="addDoctorSlot(\'' +
+    html += '<div class="slot-add" title="បន្ថែមគ្រូពេទ្យម្នាក់ទៀត" onmousedown="event.preventDefault();addDoctorSlot(\'' +
       escapeAttr(group.label).replace(/'/g, "\\'") + '\',\'' + dateStr + '\')">+</div>';
   }
   return html + '</div></td>';
@@ -795,16 +803,26 @@ function renderGroupCell(dateStr, group, row) {
 // ពេលគ្រប់ប្រអប់ក្នុងក្រុមពេញ → បង្កើតជួរថ្មីក្នុងក្រុមដដែល (ព្រឹក ឬ យប់) ហើយបើកវាយភ្លាម
 function addDoctorSlot(label, dateStr) {
   if (scheduleMonthLocked()) { showToast('🔒 ខែនេះត្រូវបានចាក់សោ'); return; }
-  var ym = currentScheduleMonthKey();
-  var cols = getColumnsForMonth(ym);
-  var newCol = { id: 'col_' + Date.now(), label: label, type: 'name' };
-  var textIdx = cols.findIndex(function (c) { return c.type === 'text'; });
-  if (textIdx === -1) cols.push(newCol); else cols.splice(textIdx, 0, newCol);
-  propagateColumnChangeForward(ym, 'add', newCol);
-  persistRemoteState();
-  renderSchedule();
-  var cell = document.querySelector('.cell-slot[data-date="' + dateStr + '"][data-field="' + newCol.id + '"]');
-  if (cell) openEditor(cell);
+  function doAdd() {
+    var ym = currentScheduleMonthKey();
+    var cols = getColumnsForMonth(ym);
+    var newCol = { id: 'col_' + Date.now(), label: label, type: 'name' };
+    var textIdx = cols.findIndex(function (c) { return c.type === 'text'; });
+    if (textIdx === -1) cols.push(newCol); else cols.splice(textIdx, 0, newCol);
+    propagateColumnChangeForward(ym, 'add', newCol);
+    persistRemoteState();
+    renderSchedule();
+    var cell = document.querySelector('.cell-slot[data-date="' + dateStr + '"][data-field="' + newCol.id + '"]');
+    if (cell) openEditor(cell);
+  }
+  // រក្សាទុកអ្វីដែលកំពុងវាយជាមុនសិន (blur → finish) ហើយទើបបន្ថែម
+  var ae = document.activeElement;
+  if (STATE.editing && ae && ae.classList && ae.classList.contains('edit-select')) {
+    ae.blur();
+    setTimeout(doAdd, 200);
+  } else {
+    doAdd();
+  }
 }
 window.addDoctorSlot = addDoctorSlot;
 
@@ -877,7 +895,6 @@ function renderSchedule() {
   html += '<div style="overflow-x:auto;"><table class="sched" style="--slot-w:' + slotW + 'px;"><thead><tr>' +
     '<th style="text-align:left;">កាលបរិច្ឆេទ</th>' + headerCells +
     '<th style="width:60px;white-space:nowrap;">' +
-    '<span class="col-add" title="បន្ថែមជួរឈរ" onclick="addColumn()">+</span> ' +
     '<span class="col-add" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ" onclick="toggleHeaderEditMode()">✎</span>' +
     '</th>' +
     '</tr></thead><tbody>';
@@ -1133,53 +1150,62 @@ function firstEmptyNameField(date) {
   return null;
 }
 
-// លោតស្វ័យប្រវត្តិ៖ ក្រុមបន្ទាប់ (ព្រឹក → យប់) ក្នុងថ្ងៃដដែល → ថ្ងៃបន្ទាប់ ក្រុមដំបូង
-function autoJumpTarget(date, field) {
+// ប្រអប់ដែលមើលឃើញ/ចូលបានក្នុងថ្ងៃមួយ ជាលំដាប់ឆ្វេង→ស្តាំ៖ ឈ្មោះដែលបំពេញរួច + ប្រអប់ទទេដំបូងក្នុងក្រុម (ជា +) + ជួរ ផ្សេងៗ
+function visibleSlotsForRow(date) {
   var cols = getColumnsForMonth(currentScheduleMonthKey());
-  var groups = nameGroups(cols);
-  var gi = groups.findIndex(function (g) { return g.cols.some(function (c) { return c.id === field; }); });
-  if (gi === -1) return null;
-  function firstEmpty(g, d) {
-    var r = rowForDate(d) || {};
-    for (var i = 0; i < g.cols.length; i++) { if (!r[g.cols[i].id]) return g.cols[i].id; }
-    return null;
-  }
-  for (var k = gi + 1; k < groups.length; k++) {
-    var f = firstEmpty(groups[k], date);
-    if (f) return { date: date, field: f };
-  }
-  var p = date.split('-');
-  var y = Number(p[0]), m = Number(p[1]), d = Number(p[2]) + 1;
-  if (d > daysInMonth(y, m)) return null;
-  var nd = y + '-' + pad2(m) + '-' + pad2(d);
-  for (var k2 = 0; k2 < groups.length; k2++) {
-    var f2 = firstEmpty(groups[k2], nd);
-    if (f2) return { date: nd, field: f2 };
-  }
-  return null;
+  var row = rowForDate(date) || {};
+  var list = [];
+  nameGroups(cols).forEach(function (g) {
+    var firstEmpty = null;
+    g.cols.forEach(function (c) { if (!row[c.id] && !firstEmpty) firstEmpty = c.id; });
+    g.cols.forEach(function (c) {
+      if (row[c.id] || c.id === firstEmpty) list.push({ field: c.id, group: g.label });
+    });
+  });
+  cols.forEach(function (c) { if (c.type === 'text') list.push({ field: c.id, group: null }); });
+  return list;
 }
-
-// រកក្រឡាជិតខាង តាមទិស up / down / left / right
-function neighborCell(date, field, dir) {
+function shiftDate(date, delta) {
   var p = date.split('-');
-  var y = Number(p[0]), m = Number(p[1]), d = Number(p[2]);
-  var nextDate = date, nextField = field;
-  if (dir === 'down' || dir === 'up') {
-    d += (dir === 'down') ? 1 : -1;
-    if (d < 1 || d > daysInMonth(y, m)) return null;
-    nextDate = y + '-' + pad2(m) + '-' + pad2(d);
-  } else {
+  var y = Number(p[0]), m = Number(p[1]), d = Number(p[2]) + delta;
+  if (d < 1 || d > daysInMonth(y, m)) return null;
+  return y + '-' + pad2(m) + '-' + pad2(d);
+}
+// ទិសដៅ៖ right/left ក្នុងថ្ងៃតែមួយ (ចុងជួរ → ថ្ងៃបន្ទាប់/មុន), down/up ទៅថ្ងៃបន្ទាប់/មុន ក្នុងក្រុមដដែល
+function moveFrom(date, field, dir) {
+  var list = visibleSlotsForRow(date);
+  var i = list.findIndex(function (x) { return x.field === field; });
+  if (i === -1) { // ប្រអប់ត្រូវបានរៀបឡើងវិញ → ប្រើប្រអប់ចុងក្រោយនៃក្រុមដដែល
     var cols = getColumnsForMonth(currentScheduleMonthKey());
-    var idx = cols.findIndex(function (c) { return c.id === field; });
-    idx += (dir === 'right') ? 1 : -1;
-    if (idx < 0 || idx >= cols.length) return null;
-    nextField = cols[idx].id;
+    var col = cols.filter(function (c) { return c.id === field; })[0];
+    var last = -1;
+    list.forEach(function (x, k) { if (col && x.group === col.label) last = k; });
+    i = last;
   }
-  return document.querySelector('.cell-slot[data-date="' + nextDate + '"][data-field="' + nextField + '"]');
+  if (dir === 'right' || dir === 'left') {
+    var j = i + (dir === 'right' ? 1 : -1);
+    if (j >= 0 && j < list.length) return { date: date, field: list[j].field };
+    var nd = shiftDate(date, dir === 'right' ? 1 : -1);
+    if (!nd) return null;
+    var nl = visibleSlotsForRow(nd);
+    if (!nl.length) return null;
+    return { date: nd, field: (dir === 'right' ? nl[0] : nl[nl.length - 1]).field };
+  }
+  var td = shiftDate(date, dir === 'down' ? 1 : -1);
+  if (!td) return null;
+  var cur = i >= 0 ? list[i] : null;
+  var tl = visibleSlotsForRow(td);
+  var grp = cur ? cur.group : null;
+  var same = tl.filter(function (x) { return x.group === grp; });
+  if (!same.length) return null;
+  var idxInGroup = cur ? list.filter(function (x, k) { return x.group === grp && k < i; }).length : 0;
+  return { date: td, field: same[Math.min(idxInGroup, same.length - 1)].field };
 }
 
 function openCellInDirection(date, field, dir) {
-  var next = neighborCell(date, field, dir);
+  var t = moveFrom(date, field, dir);
+  if (!t) return;
+  var next = document.querySelector('.cell-slot[data-date="' + t.date + '"][data-field="' + t.field + '"]');
   if (next) {
     next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     openEditor(next);
@@ -1205,13 +1231,6 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra) {
     if (newVal === currentVal) renderSchedule();
     else ok = saveCellValue(date, field, newVal);
     if (dir && ok !== false) {
-      if (dir === 'right') {
-        var tg = autoJumpTarget(date, field);
-        if (tg) {
-          var target = document.querySelector('.cell-slot[data-date="' + tg.date + '"][data-field="' + tg.field + '"]');
-          if (target) { target.scrollIntoView({ block: 'nearest', inline: 'nearest' }); openEditor(target); return; }
-        }
-      }
       openCellInDirection(date, field, dir);
     }
   }
@@ -1248,6 +1267,8 @@ function openEditor(cell) {
   var field = cell.dataset.field;
   var currentVal = cell.dataset.value;
   STATE.editing = { date: date, field: field };
+  var grpEl = cell.closest ? cell.closest('.grp-cell') : null;
+  if (grpEl) grpEl.classList.add('editing');
 
   var col = columnById(field);
   if (col && col.type === 'text') {
