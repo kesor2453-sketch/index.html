@@ -120,6 +120,18 @@
   .cell-slot.spv{background:var(--spv-bg);}
   .cell-slot.off{background:var(--off-bg);color:#a52323;font-weight:600;}
 
+  /* ក្រុមជួរឈរ (ព្រឹក / យប់) — ឈ្មោះគ្រូពេទ្យច្រើននាក់ដាក់ជួរតាមបណ្តោយ ទំហំស្មើគ្នា */
+  .grp-cell{display:flex;flex-direction:column;gap:3px;align-items:center;}
+  .grp-cell .cell-slot{width:var(--slot-w,120px);text-align:center;}
+  .cell-slot.plus{border:1px dashed var(--line);color:var(--brand);font-weight:700;background:transparent;}
+  .cell-slot.plus:hover{background:var(--spv-bg);border-color:var(--brand);}
+  .cell-slot.slot-hidden{display:none;}
+  .slot-add{
+    width:var(--slot-w,120px);min-height:26px;border:1px dashed var(--line);border-radius:8px;
+    color:var(--brand);font-weight:700;cursor:pointer;text-align:center;padding:3px 0;font-size:13px;
+  }
+  .slot-add:hover{background:var(--spv-bg);border-color:var(--brand);}
+  table.sched td.text-col{vertical-align:top;}
   select.edit-select, input.edit-select{
     width:100%;font-size:12px;padding:5px;border-radius:7px;border:1px solid var(--brand);
     font-family:inherit;
@@ -181,6 +193,7 @@
     #scheduleWrap > div{ overflow: visible !important; }
     table.sched thead th{ position:static !important; }
     .col-add, .col-move, .col-del{ display:none !important; }
+    .cell-slot.plus, .slot-add{ visibility:hidden !important; }
   }
 </style>
 </head>
@@ -722,6 +735,95 @@ function columnById(id) {
   return cols.filter(function (c) { return c.id === id; })[0] || null;
 }
 
+// ក្រុមជួរឈរឈ្មោះ — ជួរដែលមានឈ្មោះក្បាលដូចគ្នា (ព្រឹក ១-៣ → "ព្រឹក") បង្ហាញជាប្រអប់តែមួយ
+function nameGroups(cols) {
+  var groups = [], byLabel = {};
+  cols.forEach(function (c) {
+    if (c.type !== 'name') return;
+    if (!byLabel[c.label]) { byLabel[c.label] = { label: c.label, cols: [] }; groups.push(byLabel[c.label]); }
+    byLabel[c.label].cols.push(c);
+  });
+  return groups;
+}
+
+// ទំហំប្រអប់ = ទំហំឈ្មោះវែងជាងគេ (ក្នុងបញ្ជីគ្រូពេទ្យ + កាលវិភាគខែនេះ) ប្រអប់ទាំងអស់ស្មើគ្នា
+var _measureCtx = null;
+function computeSlotWidth(cols, y, m) {
+  var names = STATE.doctors.map(function (d) { return d.NameSPV; });
+  var prefix = y + '-' + pad2(m);
+  var ids = cols.filter(function (c) { return c.type === 'name'; }).map(function (c) { return c.id; });
+  STATE.scheduleAll.forEach(function (r) {
+    if (String(r.Date || '').indexOf(prefix) !== 0) return;
+    ids.forEach(function (id) { if (r[id]) names.push(r[id]); });
+  });
+  var best = 0;
+  try {
+    if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
+    _measureCtx.font = "12px 'Noto Sans Khmer', 'Inter', sans-serif";
+    names.forEach(function (n) {
+      var w = _measureCtx.measureText(String(n || '')).width;
+      if (w > best) best = w;
+    });
+  } catch (e) {
+    names.forEach(function (n) { best = Math.max(best, String(n || '').length * 7.5); });
+  }
+  return Math.min(280, Math.max(110, Math.ceil(best) + 22));
+}
+
+function renderGroupCell(dateStr, group, row) {
+  var firstEmptyId = null;
+  group.cols.forEach(function (c) { if (!firstEmptyId && !row[c.id]) firstEmptyId = c.id; });
+  var html = '<td style="vertical-align:top;"><div class="grp-cell">';
+  group.cols.forEach(function (c) {
+    var v = row[c.id];
+    var attrs = ' data-date="' + dateStr + '" data-field="' + c.id + '" data-value="' + escapeAttr(v || '') + '"';
+    if (v) {
+      html += '<div class="cell-slot spv" style="' + styleFor(v) + '"' + attrs + '>' + escapeHtml(v) + '</div>';
+    } else if (c.id === firstEmptyId) {
+      html += '<div class="cell-slot empty plus" title="បន្ថែមគ្រូពេទ្យ"' + attrs + '>+</div>';
+    } else {
+      html += '<div class="cell-slot empty slot-hidden"' + attrs + '></div>';
+    }
+  });
+  if (!firstEmptyId) {
+    html += '<div class="slot-add" title="បន្ថែមគ្រូពេទ្យម្នាក់ទៀត" onclick="addDoctorSlot(\'' +
+      escapeAttr(group.label).replace(/'/g, "\\'") + '\',\'' + dateStr + '\')">+</div>';
+  }
+  return html + '</div></td>';
+}
+
+// ពេលគ្រប់ប្រអប់ក្នុងក្រុមពេញ → បង្កើតជួរថ្មីក្នុងក្រុមដដែល (ព្រឹក ឬ យប់) ហើយបើកវាយភ្លាម
+function addDoctorSlot(label, dateStr) {
+  if (scheduleMonthLocked()) { showToast('🔒 ខែនេះត្រូវបានចាក់សោ'); return; }
+  var ym = currentScheduleMonthKey();
+  var cols = getColumnsForMonth(ym);
+  var newCol = { id: 'col_' + Date.now(), label: label, type: 'name' };
+  var textIdx = cols.findIndex(function (c) { return c.type === 'text'; });
+  if (textIdx === -1) cols.push(newCol); else cols.splice(textIdx, 0, newCol);
+  propagateColumnChangeForward(ym, 'add', newCol);
+  persistRemoteState();
+  renderSchedule();
+  var cell = document.querySelector('.cell-slot[data-date="' + dateStr + '"][data-field="' + newCol.id + '"]');
+  if (cell) openEditor(cell);
+}
+window.addDoctorSlot = addDoctorSlot;
+
+function renameGroup(inputEl) {
+  var oldLabel = inputEl.dataset.oldlabel;
+  var newLabel = inputEl.value.trim();
+  if (!newLabel) { inputEl.value = oldLabel; return; }
+  var ym = currentScheduleMonthKey();
+  getColumnsForMonth(ym).forEach(function (c) { if (c.type === 'name' && c.label === oldLabel) c.label = newLabel; });
+  if (STATE.columnsTemplate) STATE.columnsTemplate.forEach(function (c) { if (c.type === 'name' && c.label === oldLabel) c.label = newLabel; });
+  Object.keys(STATE.columnsByMonth).forEach(function (k) {
+    if (k > ym) STATE.columnsByMonth[k].forEach(function (c) { if (c.type === 'name' && c.label === oldLabel) c.label = newLabel; });
+  });
+  persistRemoteState();
+  renderSchedule();
+  showToast('ប្តូរឈ្មោះក្រុមរួចរាល់ ✓');
+}
+window.renameGroup = renameGroup;
+
 var headerEditMode = false;
 var dragColId = null;
 
@@ -736,26 +838,35 @@ function renderSchedule() {
   document.getElementById('monthLabel').textContent = MONTH_NAMES_KM[m - 1] + ' ' + y;
   renderScheduleLockButton();
 
-  var headerCells = cols.map(function (c, idx) {
+  var groups = nameGroups(cols);
+  var textCols = cols.filter(function (c) { return c.type === 'text'; });
+  var slotW = computeSlotWidth(cols, y, m);
+
+  var headerCells = groups.map(function (g) {
     var inner;
     if (headerEditMode) {
-      var leftArrow = idx > 0
-        ? '<span class="col-move" title="ផ្លាស់ទីទៅឆ្វេង" onclick="moveColumn(\'' + c.id + '\',-1)">◀</span>' : '';
-      var rightArrow = idx < cols.length - 1
-        ? '<span class="col-move" title="ផ្លាស់ទីទៅស្តាំ" onclick="moveColumn(\'' + c.id + '\',1)">▶</span>' : '';
+      var lastId = g.cols[g.cols.length - 1].id;
       inner = '<div style="display:flex;align-items:center;justify-content:center;gap:2px;flex-wrap:nowrap;">' +
-        leftArrow +
+        '<input type="text" class="edit-select col-label-input" value="' + escapeAttr(g.label) +
+        '" data-oldlabel="' + escapeAttr(g.label) + '" onchange="renameGroup(this)" style="text-align:center;font-weight:600;">' +
+        '<span class="col-del" title="លុបជួរចុងក្រោយនៃក្រុមនេះ" onclick="deleteColumn(\'' + lastId + '\')">×</span>' +
+        '</div>';
+    } else {
+      inner = escapeHtml(g.label);
+    }
+    return '<th class="group-spv" style="padding:2px;">' + inner + '</th>';
+  }).join('') + textCols.map(function (c) {
+    var inner;
+    if (headerEditMode) {
+      inner = '<div style="display:flex;align-items:center;justify-content:center;gap:2px;flex-wrap:nowrap;">' +
         '<input type="text" class="edit-select col-label-input" value="' + escapeAttr(c.label) +
         '" data-colid="' + c.id + '" onchange="renameColumn(this)" style="text-align:center;font-weight:600;">' +
-        rightArrow +
         '<span class="col-del" title="លុបជួរឈរនេះ" onclick="deleteColumn(\'' + c.id + '\')">×</span>' +
         '</div>';
     } else {
       inner = escapeHtml(c.label);
     }
-    return '<th class="group-spv" style="padding:2px;cursor:move;" draggable="true" ' +
-      'ondragstart="onColDragStart(event,\'' + c.id + '\')" ondragover="onColDragOver(event)" ondrop="onColDrop(event,\'' + c.id + '\')">' +
-      inner + '</th>';
+    return '<th class="group-spv" style="padding:2px;">' + inner + '</th>';
   }).join('');
 
   var html = '';
@@ -763,7 +874,7 @@ function renderSchedule() {
     html += '<div style="background:var(--off-bg);color:#a52323;border-radius:10px;padding:9px 13px;font-size:12.5px;margin-bottom:12px;font-weight:600;">' +
       '🔒 ខែនេះបានបញ្ចប់ហើយ និងត្រូវបានចាក់សោ — ចុច "🔓 កែប្រែខែនេះ" ខាងលើដើម្បីអនុញ្ញាតឲ្យកែ</div>';
   }
-  html += '<div style="overflow-x:auto;"><table class="sched"><thead><tr>' +
+  html += '<div style="overflow-x:auto;"><table class="sched" style="--slot-w:' + slotW + 'px;"><thead><tr>' +
     '<th style="text-align:left;">កាលបរិច្ឆេទ</th>' + headerCells +
     '<th style="width:60px;white-space:nowrap;">' +
     '<span class="col-add" title="បន្ថែមជួរឈរ" onclick="addColumn()">+</span> ' +
@@ -789,9 +900,8 @@ function renderSchedule() {
       '<span class="dow">' + DOW_KM[dowName] +
       '</span></td>';
 
-    cols.forEach(function (c) {
-      html += (c.type === 'text') ? renderOffCell(dateStr, c.id, row[c.id], locked) : renderSlotCell(dateStr, c.id, row[c.id], locked);
-    });
+    groups.forEach(function (g) { html += renderGroupCell(dateStr, g, row); });
+    textCols.forEach(function (c) { html += renderOffCell(dateStr, c.id, row[c.id], locked); });
     html += '<td></td>';
     html += '</tr>';
   }
@@ -988,6 +1098,67 @@ function harvestNames(fields) {
 //   'right' = ជួរឈរបន្ទាប់ក្នុងថ្ងៃដដែល,  'down' = ថ្ងៃបន្ទាប់ក្នុងជួរឈរដដែល
 var AUTO_JUMP_DIRECTION = 'right';
 
+// ======== តម្រៀបឈ្មោះគ្រូពេទ្យតាម alphabet ========
+// Dr.Ka Seyla នៅចុងក្រោយគេជានិច្ច ក្នុងក្រុមជួរឈរដូចគ្នា ហើយក្រឡាទទេនៅចុងបំផុត
+var LAST_DOCTOR_KEY = 'ka seyla';
+function sortKeyForName(raw) {
+  var base = normName(baseDoctorName(raw));
+  return { base: base, last: base.indexOf(LAST_DOCTOR_KEY) !== -1 };
+}
+function compareDoctorNames(a, b) {
+  var ka = sortKeyForName(a), kb = sortKeyForName(b);
+  if (ka.last !== kb.last) return ka.last ? 1 : -1;
+  if (ka.base < kb.base) return -1;
+  if (ka.base > kb.base) return 1;
+  return 0;
+}
+// តម្រៀបតម្លៃក្នុងជួរថ្ងៃតែមួយ ក្នុងក្រុមជួរឈរដែលមានឈ្មោះ (label) ដូចគ្នា
+function sortRowGroup(row, ym, field) {
+  var cols = getColumnsForMonth(ym);
+  var col = cols.filter(function (c) { return c.id === field; })[0];
+  if (!col || col.type !== 'name') return;
+  var group = cols.filter(function (c) { return c.type === 'name' && c.label === col.label; });
+  if (group.length < 2) return;
+  var values = group.map(function (c) { return row[c.id] || ''; });
+  var filled = values.filter(function (v) { return v; }).sort(compareDoctorNames);
+  var empties = values.length - filled.length;
+  for (var i = 0; i < empties; i++) filled.push('');
+  group.forEach(function (c, i) { row[c.id] = filled[i]; });
+}
+// ក្រឡាទទេដំបូងក្នុងជួរថ្ងៃ (ក្នុងចំណោមជួរឈរឈ្មោះ) — សម្រាប់លោតបំពេញបន្ត
+function firstEmptyNameField(date) {
+  var row = rowForDate(date) || {};
+  var cols = getColumnsForMonth(currentScheduleMonthKey()).filter(function (c) { return c.type === 'name'; });
+  for (var i = 0; i < cols.length; i++) { if (!row[cols[i].id]) return cols[i].id; }
+  return null;
+}
+
+// លោតស្វ័យប្រវត្តិ៖ ក្រុមបន្ទាប់ (ព្រឹក → យប់) ក្នុងថ្ងៃដដែល → ថ្ងៃបន្ទាប់ ក្រុមដំបូង
+function autoJumpTarget(date, field) {
+  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  var groups = nameGroups(cols);
+  var gi = groups.findIndex(function (g) { return g.cols.some(function (c) { return c.id === field; }); });
+  if (gi === -1) return null;
+  function firstEmpty(g, d) {
+    var r = rowForDate(d) || {};
+    for (var i = 0; i < g.cols.length; i++) { if (!r[g.cols[i].id]) return g.cols[i].id; }
+    return null;
+  }
+  for (var k = gi + 1; k < groups.length; k++) {
+    var f = firstEmpty(groups[k], date);
+    if (f) return { date: date, field: f };
+  }
+  var p = date.split('-');
+  var y = Number(p[0]), m = Number(p[1]), d = Number(p[2]) + 1;
+  if (d > daysInMonth(y, m)) return null;
+  var nd = y + '-' + pad2(m) + '-' + pad2(d);
+  for (var k2 = 0; k2 < groups.length; k2++) {
+    var f2 = firstEmpty(groups[k2], nd);
+    if (f2) return { date: nd, field: f2 };
+  }
+  return null;
+}
+
 // រកក្រឡាជិតខាង តាមទិស up / down / left / right
 function neighborCell(date, field, dir) {
   var p = date.split('-');
@@ -1033,7 +1204,16 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra) {
     var ok = true;
     if (newVal === currentVal) renderSchedule();
     else ok = saveCellValue(date, field, newVal);
-    if (dir && ok !== false) openCellInDirection(date, field, dir);
+    if (dir && ok !== false) {
+      if (dir === 'right') {
+        var tg = autoJumpTarget(date, field);
+        if (tg) {
+          var target = document.querySelector('.cell-slot[data-date="' + tg.date + '"][data-field="' + tg.field + '"]');
+          if (target) { target.scrollIntoView({ block: 'nearest', inline: 'nearest' }); openEditor(target); return; }
+        }
+      }
+      openCellInDirection(date, field, dir);
+    }
   }
   input.addEventListener('keydown', function (e) {
     if (e.isComposing || e.keyCode === 229) return; // កំពុងវាយអក្សរខ្មែរ (IME)
@@ -1094,6 +1274,7 @@ function openEditor(cell) {
   var suggestions = fromDoctors.concat(fromHistory);
   var seen = {};
   suggestions = suggestions.filter(function (s) { return s && !seen[s] && (seen[s] = true); });
+  suggestions.sort(compareDoctorNames);
 
   var listId = 'dlist_' + date.replace(/-/g, '') + '_' + field;
   var datalist = document.createElement('datalist');
@@ -1151,6 +1332,7 @@ function saveCellValue(date, field, value) {
 
   var oldValue = row[field] || '';
   row[field] = value;
+  sortRowGroup(row, date.slice(0, 7), field);
   var nowIso = new Date().toISOString();
 
   var logKey = date.slice(0, 7);
