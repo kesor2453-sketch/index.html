@@ -832,7 +832,7 @@ function renderGroupCell(dateStr, group, row) {
       html += '<div class="cell-slot empty slot-hidden' + (i === 0 ? ' plus' : '') + '"' + attrs + '></div>';
     }
   });
-  if (o.filled.length > 0) {
+  {
     html += '<div class="add-circle" title="បន្ថែមគ្រូពេទ្យ" onmousedown="event.preventDefault();groupAddClick(\'' +
       escapeAttr(group.label).replace(/'/g, "\\'") + '\',\'' + dateStr + '\',\'' + (firstEmptyId || '') + '\')">+</div>';
   }
