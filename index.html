@@ -160,8 +160,11 @@
   .chip-x:hover{background:rgba(255,255,255,.55);border-radius:4px;}
   .add-circle{display:none;width:28px;height:28px;border-radius:50%;border:1px dashed #c3cad6;color:#4a7be0;align-items:center;justify-content:center;cursor:pointer;font-size:14px;font-weight:600;flex-shrink:0;}
   .add-circle:hover{background:var(--spv-bg);border-color:var(--brand);}
-  table.sched.edit-on .add-circle{display:inline-flex;}
+  /* ប៊ូតុង + មូលក្នុងជួរត្រូវបានលុប — ប្រើតែ + លើក្បាលតារាង */
   table.sched.edit-on .add-circle.add-wait{display:none;}
+  .hdr-add{display:none;margin-left:8px;width:22px;height:22px;line-height:20px;border-radius:50%;border:1px solid var(--brand);color:var(--brand);font-weight:700;font-size:14px;text-align:center;cursor:pointer;vertical-align:middle;}
+  .hdr-add:hover{background:var(--brand);color:#fff;}
+  table.sched.edit-on .hdr-add{display:inline-block;}
   table.sched.edit-on .grp-cell .cell-slot.first-empty{display:none;}
   .grp-cell .cell-slot.slot-box, .grp-cell .cell-ph{width:var(--slot-w,120px);min-height:34px;border-radius:10px;border:1px dashed #c3cad6;background:#fff;box-shadow:none;box-sizing:border-box;cursor:pointer;flex-shrink:0;}
   .grp-cell .cell-slot, .grp-cell .cell-ph{flex:1 1 0;max-width:var(--slot-w,120px);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
@@ -223,7 +226,7 @@
     header.top, .tabs, .toast{ display:none !important; }
     .panel{ display:none !important; }
     .panel.active{ display:block !important; }
-    .no-print, .sched-bar, .sched-hint, .add-circle, .chip-x, .slot-box, .cell-ph{ display:none !important; }
+    .no-print, .sched-bar, .sched-hint, .add-circle, .chip-x, .slot-box, .cell-ph, .hdr-add{ display:none !important; }
     .sched-box{ border:none !important; border-radius:0 !important; }
     #panel-schedule > .card:nth-of-type(2){ display:none !important; } /* phone list not printed */
     .card{ box-shadow:none !important; padding:0 !important; margin:0 !important; border-radius:0 !important; }
@@ -851,7 +854,7 @@ function renderGroupCell(dateStr, group, row) {
         ? '<span class="chip-x" title="លុបឈ្មោះនេះ" onclick="event.stopPropagation();clearSlot(\'' + dateStr + '\',\'' + it.field + '\')">×</span>'
         : '') + '</div>';
   });
-  var showEmpty = editModeOn() ? Math.max(0, minBoxesForLabel(group.label) - o.filled.length) : 0;
+  var showEmpty = editModeOn() ? Math.max(0, Math.max(minBoxesForLabel(group.label), group.cols.length) - o.filled.length) : 0;
   o.empty.forEach(function (it, i) {
     var attrs = ' data-date="' + dateStr + '" data-field="' + it.field + '" data-value=""';
     if (i < showEmpty) {
@@ -933,6 +936,21 @@ function addDoctorSlot(label, dateStr) {
 }
 window.addDoctorSlot = addDoctorSlot;
 
+// ប៊ូតុង + លើក្បាលតារាង៖ បន្ថែមប្រអប់គ្រូពេទ្យ ១ ក្នុងក្រុម (គ្រប់ថ្ងៃ)
+function addGroupColumn(label) {
+  if (scheduleMonthLocked()) { showToast('🔒 ខែនេះត្រូវបានចាក់សោ'); return; }
+  if (STATE.editing) return;
+  var ym = currentScheduleMonthKey();
+  var cols = getColumnsForMonth(ym);
+  var newCol = { id: 'col_' + Date.now(), label: label, type: 'name' };
+  var textIdx = cols.findIndex(function (c) { return c.type === 'text'; });
+  if (textIdx === -1) cols.push(newCol); else cols.splice(textIdx, 0, newCol);
+  propagateColumnChangeForward(ym, 'add', newCol);
+  persistRemoteState();
+  renderSchedule();
+}
+window.addGroupColumn = addGroupColumn;
+
 function renameGroup(inputEl) {
   var oldLabel = inputEl.dataset.oldlabel;
   var newLabel = inputEl.value.trim();
@@ -970,7 +988,8 @@ function renderSchedule() {
   var gw = Math.floor(75 / Math.max(1, groups.length));
 
   var headerCells = groups.map(function (g) {
-    return '<th class="group-spv" style="padding:2px;width:' + gw + '%;">' + escapeHtml(g.label) + '</th>';
+    return '<th class="group-spv" style="padding:2px;width:' + gw + '%;">' + escapeHtml(g.label) +
+      '<span class="hdr-add" title="បន្ថែមប្រអប់គ្រូពេទ្យ" onclick="addGroupColumn(\'' + escapeAttr(g.label).replace(/'/g, "\\'") + '\')">+</span></th>';
   }).join('') + textCols.map(function (c) {
     return '<th class="group-spv" style="padding:2px;">' + escapeHtml(c.label) + '</th>';
   }).join('');
