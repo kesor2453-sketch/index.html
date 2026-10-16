@@ -162,6 +162,9 @@
   .add-circle:hover{background:var(--spv-bg);border-color:var(--brand);}
   /* ប៊ូតុង + មូលក្នុងជួរត្រូវបានលុប — ប្រើតែ + លើក្បាលតារាង */
   table.sched.edit-on .add-circle.add-wait{display:none;}
+  .bar-tools{display:inline-flex;gap:14px;margin-left:16px;font-weight:600;font-size:12px;}
+  .bar-grp{display:inline-flex;align-items:center;gap:4px;}
+  .sched-bar .bar-grp button{width:22px;height:22px;padding:0;line-height:20px;font-size:14px;text-align:center;}
   .hdr-add{display:none;margin-left:8px;width:22px;height:22px;line-height:20px;border-radius:50%;border:1px solid var(--brand);color:var(--brand);font-weight:700;font-size:14px;text-align:center;cursor:pointer;vertical-align:middle;}
   .hdr-add:hover{background:var(--brand);color:#fff;}
   table.sched.edit-on .hdr-add{display:inline-block;}
@@ -226,7 +229,7 @@
     header.top, .tabs, .toast{ display:none !important; }
     .panel{ display:none !important; }
     .panel.active{ display:block !important; }
-    .no-print, .sched-bar, .sched-hint, .add-circle, .chip-x, .slot-box, .cell-ph, .hdr-add{ display:none !important; }
+    .no-print, .sched-bar, .sched-hint, .add-circle, .chip-x, .slot-box, .cell-ph, .hdr-add, .bar-tools{ display:none !important; }
     .sched-box{ border:none !important; border-radius:0 !important; }
     #panel-schedule > .card:nth-of-type(2){ display:none !important; } /* phone list not printed */
     .card{ box-shadow:none !important; padding:0 !important; margin:0 !important; border-radius:0 !important; }
@@ -951,6 +954,25 @@ function addGroupColumn(label) {
 }
 window.addGroupColumn = addGroupColumn;
 
+// លុបប្រអប់ ១ (ជួរចុងក្រោយនៃក្រុម) — បើមានឈ្មោះក្នុងខែនេះ សួរបញ្ជាក់ជាមុន
+function removeGroupColumn(label) {
+  if (scheduleMonthLocked()) { showToast('🔒 ខែនេះត្រូវបានចាក់សោ'); return; }
+  if (STATE.editing) return;
+  var ym = currentScheduleMonthKey();
+  var g = nameGroups(getColumnsForMonth(ym)).filter(function (x) { return x.label === label; })[0];
+  if (!g || g.cols.length <= 1) { showToast('ត្រូវមានយ៉ាងហោចណាស់ ១ ប្រអប់'); return; }
+  var last = g.cols[g.cols.length - 1];
+  var prefix = ym;
+  var used = STATE.scheduleAll.filter(function (r) { return String(r.Date || '').indexOf(prefix) === 0 && r[last.id]; }).length;
+  if (used > 0 && !window.confirm('ប្រអប់ចុងក្រោយមាន ' + used + ' ឈ្មោះក្នុងខែនេះ។ ទិន្នន័យនឹងលាក់ពីតារាង។ បន្តលុប?')) return;
+  var cols = getColumnsForMonth(ym);
+  STATE.columnsByMonth[ym] = cols.filter(function (c) { return c.id !== last.id; });
+  propagateColumnChangeForward(ym, 'delete', last.id);
+  persistRemoteState();
+  renderSchedule();
+}
+window.removeGroupColumn = removeGroupColumn;
+
 function renameGroup(inputEl) {
   var oldLabel = inputEl.dataset.oldlabel;
   var newLabel = inputEl.value.trim();
@@ -970,6 +992,16 @@ window.renameGroup = renameGroup;
 var headerEditMode = false;
 var dragColId = null;
 
+function barGroupTools(groups) {
+  if (!editModeOn()) return '';
+  return '<span class="bar-tools">' + groups.map(function (g) {
+    var lb = escapeAttr(g.label).replace(/'/g, "\\'");
+    return '<span class="bar-grp">' + escapeHtml(g.label) +
+      ' <button type="button" title="លុបប្រអប់ ១" onclick="removeGroupColumn(\'' + lb + '\')">−</button>' +
+      '<button type="button" title="បន្ថែមប្រអប់ ១" onclick="addGroupColumn(\'' + lb + '\')">+</button></span>';
+  }).join('') + '</span>';
+}
+
 function renderSchedule() {
   var y = STATE.year, m = STATE.month;
   var nDays = daysInMonth(y, m);
@@ -988,8 +1020,7 @@ function renderSchedule() {
   var gw = Math.floor(75 / Math.max(1, groups.length));
 
   var headerCells = groups.map(function (g) {
-    return '<th class="group-spv" style="padding:2px;width:' + gw + '%;">' + escapeHtml(g.label) +
-      '<span class="hdr-add" title="បន្ថែមប្រអប់គ្រូពេទ្យ" onclick="addGroupColumn(\'' + escapeAttr(g.label).replace(/'/g, "\\'") + '\')">+</span></th>';
+    return '<th class="group-spv" style="padding:2px;width:' + gw + '%;">' + escapeHtml(g.label) + '</th>';
   }).join('') + textCols.map(function (c) {
     return '<th class="group-spv" style="padding:2px;">' + escapeHtml(c.label) + '</th>';
   }).join('');
@@ -1001,7 +1032,7 @@ function renderSchedule() {
   }
   html += '<div class="sched-hint">ចុចលើឈ្មោះគ្រូពេទ្យ ដើម្បីជំនួស · ចុច ✏️ កែប្រែ ដើម្បីបន្ថែម/លុប · ប្រើព្រួញ ← ↑ ↓ → និង Enter ដើម្បីរំកិល</div>' +
     '<div class="sched-box">' +
-    '<div class="sched-bar"><span>🩺 គ្រូពេទ្យ</span>' +
+    '<div class="sched-bar"><span>🩺 គ្រូពេទ្យ</span>' + barGroupTools(groups) +
     (futureMonth ? '' : '<button type="button" onclick="toggleHeaderEditMode()">' + (headerEditMode ? '✅ រួចរាល់' : '✏️ កែប្រែ') + '</button>') + '</div>' +
     '<div style="overflow-x:auto;"><table class="sched' + (editModeOn() ? ' edit-on' : '') + '" style="--slot-w:' + slotW + 'px;"><thead><tr>' +
     '<th style="text-align:left;width:118px;">ថ្ងៃ</th>' + headerCells +
