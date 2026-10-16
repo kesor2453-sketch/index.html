@@ -882,6 +882,13 @@ function renderGroupCell(dateStr, group, row) {
 function clearSlot(dateStr, field) {
   if (scheduleMonthLocked()) { showToast('🔒 ខែនេះត្រូវបានចាក់សោ'); return; }
   if (STATE.editing) return;
+  if (reasonPromptActive()) {
+    askChangeReason(function (type, note) {
+      pendingReason = { date: dateStr, field: field, type: type, note: note };
+      saveCellValue(dateStr, field, '');
+    });
+    return;
+  }
   saveCellValue(dateStr, field, '');
 }
 window.clearSlot = clearSlot;
@@ -1235,7 +1242,7 @@ function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
 
 function bindCellClicks() {
   document.querySelectorAll('.cell-slot').forEach(function (cell) {
-    cell.addEventListener('click', function () { openEditor(cell); });
+    cell.addEventListener('click', function () { cellClicked(cell); });
   });
 }
 
@@ -1490,6 +1497,70 @@ function openEditor(cell) {
   });
 }
 
+// ===== មូលហេតុនៃការកែ (ខែនេះ ពេលចុច ✏️ កែប្រែ) =====
+var CHANGE_REASONS = ['ការជំនួស', 'ដូរវេន', 'វេនយាមខ្លួនឯង', 'ផ្សេងៗ'];
+var pendingReason = null;
+
+function reasonPromptActive() {
+  return headerEditMode && isCurrentMonthKey(currentScheduleMonthKey()) && !scheduleMonthLocked();
+}
+
+function askChangeReason(onDone) {
+  var old = document.getElementById('reasonModal');
+  if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'reasonModal';
+  ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(20,25,40,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:14px;padding:18px;width:min(360px,100%);box-shadow:0 10px 30px rgba(0,0,0,.25);font-family:inherit;';
+  box.innerHTML = '<div style="font-weight:700;margin-bottom:12px;">មូលហេតុនៃការកែប្រែ</div>' +
+    '<div id="reasonBtns" style="display:flex;flex-direction:column;gap:8px;"></div>' +
+    '<div id="reasonNoteWrap" style="display:none;margin-top:10px;">' +
+      '<textarea id="reasonNote" rows="3" placeholder="សរសេរសម្គាល់..." style="width:100%;box-sizing:border-box;border:1px solid #c3cad6;border-radius:8px;padding:8px;font-family:inherit;font-size:13px;"></textarea>' +
+      '<button type="button" id="reasonOk" style="margin-top:8px;width:100%;border:none;background:var(--brand);color:#fff;border-radius:8px;padding:9px;font-family:inherit;font-weight:600;cursor:pointer;">បន្ត</button>' +
+    '</div>' +
+    '<button type="button" id="reasonCancel" style="margin-top:10px;width:100%;border:none;background:#eef1f6;border-radius:8px;padding:8px;font-family:inherit;cursor:pointer;">បោះបង់</button>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  function close() { ov.remove(); }
+  var btns = box.querySelector('#reasonBtns');
+  CHANGE_REASONS.forEach(function (r) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = r;
+    b.style.cssText = 'border:1px solid #c3cad6;background:#fff;border-radius:10px;padding:10px;font-family:inherit;font-weight:600;font-size:14px;cursor:pointer;text-align:left;';
+    b.onclick = function () {
+      if (r === 'ផ្សេងៗ') {
+        box.querySelector('#reasonNoteWrap').style.display = 'block';
+        btns.style.display = 'none';
+        box.querySelector('#reasonNote').focus();
+      } else { close(); onDone(r, ''); }
+    };
+    btns.appendChild(b);
+  });
+  box.querySelector('#reasonOk').onclick = function () {
+    var note = box.querySelector('#reasonNote').value.trim();
+    close(); onDone('ផ្សេងៗ', note);
+  };
+  box.querySelector('#reasonCancel').onclick = close;
+  ov.addEventListener('mousedown', function (e) { if (e.target === ov) close(); });
+}
+
+function cellClicked(cell) {
+  var filled = cell.dataset.value && cell.classList.contains('spv');
+  var col = columnById(cell.dataset.field);
+  if (filled && col && col.type === 'name' && !STATE.editing && reasonPromptActive()) {
+    askChangeReason(function (type, note) {
+      pendingReason = { date: cell.dataset.date, field: cell.dataset.field, type: type, note: note };
+      openEditor(cell);
+    });
+    return;
+  }
+  pendingReason = null;
+  openEditor(cell);
+}
+
 function saveCellValue(date, field, value) {
   var row = rowForDate(date);
   if (!row) { row = { Date: date }; STATE.scheduleAll.push(row); }
@@ -1518,7 +1589,13 @@ function saveCellValue(date, field, value) {
   if (isCurrentMonthKey(logKey)) {
     row._log = row._log || {};
     row._log[field] = row._log[field] || [];
-    row._log[field].push({ at: nowIso, value: value, oldValue: oldValue, device: getDeviceName() });
+    var entry = { at: nowIso, value: value, oldValue: oldValue, device: getDeviceName() };
+    if (pendingReason && pendingReason.date === date && pendingReason.field === field && value !== oldValue) {
+      entry.reason = pendingReason.type;
+      if (pendingReason.note) entry.note = pendingReason.note;
+    }
+    pendingReason = null;
+    row._log[field].push(entry);
   }
 
   renderSchedule();
@@ -1824,7 +1901,7 @@ function renderLog() {
     cols.forEach(function (c) {
       var log = (row._log && row._log[c.id]) || [];
       log.forEach(function (e) {
-        entries.push({ date: row.Date, field: c.label, value: e.value, oldValue: e.oldValue, device: e.device, at: e.at });
+        entries.push({ date: row.Date, field: c.label, value: e.value, oldValue: e.oldValue, device: e.device, at: e.at, reason: e.reason, note: e.note });
       });
     });
   });
@@ -1848,12 +1925,13 @@ function renderLog() {
     var fromCell = e.oldValue ? escapeHtml(e.oldValue) : '<span style="color:var(--sub);">(ទទេ)</span>';
     var toCell = e.value ? escapeHtml(e.value) : '<span style="color:var(--off);">(សម្អាត)</span>';
     var deviceCell = e.device ? escapeHtml(e.device) : '<span style="color:var(--sub);">—</span>';
+    var reasonCell = e.reason ? '<b>' + escapeHtml(e.reason) + '</b>' + (e.note ? '<div style="color:var(--sub);font-size:12px;">' + escapeHtml(e.note) + '</div>' : '') : '<span style="color:var(--sub);">—</span>';
     return '<tr><td>' + dParts[2] + '/' + dParts[1] + '</td><td>' + escapeHtml(e.field) + '</td><td>' + fromCell +
-      '</td><td>→ ' + toCell + '</td><td>' + deviceCell + '</td><td style="color:var(--sub);white-space:nowrap;">' + when + '</td></tr>';
+      '</td><td>→ ' + toCell + '</td><td>' + reasonCell + '</td><td>' + deviceCell + '</td><td style="color:var(--sub);white-space:nowrap;">' + when + '</td></tr>';
   }).join('');
 
   wrap.innerHTML = note + '<div style="overflow-x:auto;"><table class="pay"><thead><tr>' +
-    '<th>ថ្ងៃ</th><th>វេន</th><th>ពី</th><th>ទៅ</th><th>ឧបករណ៍/អ្នកកែ</th><th style="text-align:right;">ពេលកែប្រែ</th>' +
+    '<th>ថ្ងៃ</th><th>វេន</th><th>ពី</th><th>ទៅ</th><th>មូលហេតុ</th><th>ឧបករណ៍/អ្នកកែ</th><th style="text-align:right;">ពេលកែប្រែ</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
