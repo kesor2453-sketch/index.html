@@ -150,6 +150,8 @@
   table.sched tbody tr.weekend td.date-cell .dow{color:#fff;}
   table.sched tbody tr.today td.date-cell{background:#ffe27a;color:#1c2430;}
   .grp-cell{justify-content:flex-start;gap:6px;}
+  table.sched thead th.group-spv, table.sched tbody td.grp-td{border-left:2px solid #c3cddd;padding-left:16px !important;padding-right:16px !important;}
+  table.sched tbody td.grp-td{padding-top:7px;padding-bottom:7px;}
   .grp-cell .cell-slot{min-height:36px;border-radius:10px;padding:9px 10px;font-weight:600;font-size:13px;box-shadow:0 1px 3px rgba(20,25,40,.12);display:flex;align-items:center;justify-content:center;}
   .grp-cell .cell-slot.empty{box-shadow:none;}
   .grp-cell .cell-slot.plus, .grp-cell .slot-add{border-radius:10px;}
@@ -799,7 +801,7 @@ function renderGroupCell(dateStr, group, row) {
     if (row[c.id]) filledCount++;
     else if (!firstEmptyId) firstEmptyId = c.id;
   });
-  var html = '<td style="vertical-align:top;"><div class="grp-cell">';
+  var html = '<td class="grp-td" style="vertical-align:top;"><div class="grp-cell">';
   group.cols.forEach(function (c) {
     var v = row[c.id];
     var attrs = ' data-date="' + dateStr + '" data-field="' + c.id + '" data-value="' + escapeAttr(v || '') + '"';
