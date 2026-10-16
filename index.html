@@ -161,6 +161,7 @@
   .add-circle{display:none;width:28px;height:28px;border-radius:50%;border:1px dashed #c3cad6;color:#4a7be0;align-items:center;justify-content:center;cursor:pointer;font-size:14px;font-weight:600;flex-shrink:0;}
   .add-circle:hover{background:var(--spv-bg);border-color:var(--brand);}
   table.sched.edit-on .add-circle{display:inline-flex;}
+  table.sched.edit-on .add-circle.add-wait{display:none;}
   table.sched.edit-on .grp-cell .cell-slot.first-empty{display:none;}
   .grp-cell .cell-slot.slot-box, .grp-cell .cell-ph{width:var(--slot-w,120px);min-height:34px;border-radius:10px;border:1px dashed #c3cad6;background:#fff;box-shadow:none;box-sizing:border-box;cursor:pointer;flex-shrink:0;}
   .grp-cell .cell-slot, .grp-cell .cell-ph{flex:0 1 var(--slot-w,120px);min-width:60px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
@@ -858,7 +859,7 @@ function renderGroupCell(dateStr, group, row) {
   }
   firstEmptyId = o.empty.length > showEmpty ? o.empty[showEmpty].field : null;
   {
-    html += '<div class="add-circle" title="បន្ថែមគ្រូពេទ្យ" onmousedown="event.preventDefault();groupAddClick(\'' +
+    html += '<div class="add-circle' + (showEmpty > 0 ? ' add-wait' : '') + '" title="បន្ថែមគ្រូពេទ្យ" onmousedown="event.preventDefault();groupAddClick(\'' +
       escapeAttr(group.label).replace(/'/g, "\\'") + '\',\'' + dateStr + '\',\'' + (firstEmptyId || '') + '\')">+</div>';
   }
   return html + '</div></td>';
