@@ -801,6 +801,11 @@ function computeSlotWidth(cols, y, m) {
   return Math.min(300, Math.max(130, Math.ceil(best) + 44));
 }
 
+function editModeOn() {
+  // ខែមិនទាន់ដល់ → បង្ហាញ × និង + ជានិច្ច (គ្មានប៊ូតុង កែប្រែ); ខែផ្សេង → តាមប៊ូតុង ✏️ កែប្រែ
+  return isFutureMonthKey(currentScheduleMonthKey()) || headerEditMode;
+}
+
 // លំដាប់បង្ហាញក្នុងក្រុម៖ ឈ្មោះដែលមាន តម្រៀប alphabet (Dr.Ka Seyla ចុងក្រោយ) → ប្រអប់ទទេ
 // (មិនកែទិន្នន័យទេ — ចិញ្ចៀនម្នាក់ៗនៅតែភ្ជាប់នឹងក្រឡាដើមរបស់ខ្លួន)
 function groupSlotOrder(row, group) {
@@ -820,7 +825,7 @@ function renderGroupCell(dateStr, group, row) {
   o.filled.forEach(function (it) {
     var attrs = ' data-date="' + dateStr + '" data-field="' + it.field + '" data-value="' + escapeAttr(it.value) + '"';
     html += '<div class="cell-slot spv" style="' + styleFor(it.value) + '"' + attrs + '>' + escapeHtml(it.value) +
-      (headerEditMode
+      (editModeOn()
         ? '<span class="chip-x" title="លុបឈ្មោះនេះ" onclick="event.stopPropagation();clearSlot(\'' + dateStr + '\',\'' + it.field + '\')">×</span>'
         : '') + '</div>';
   });
@@ -926,7 +931,6 @@ function renderSchedule() {
   var cols = getColumnsForMonth(currentScheduleMonthKey());
   var locked = scheduleMonthLocked();
   var futureMonth = isFutureMonthKey(currentScheduleMonthKey());
-  if (futureMonth) headerEditMode = false; // ខែមិនទាន់ដល់ → គ្មានរបៀបកែប្រែ
 
   document.getElementById('monthLabel').textContent = MONTH_NAMES_KM[m - 1] + ' ' + y;
   renderScheduleLockButton();
@@ -951,7 +955,7 @@ function renderSchedule() {
     '<div class="sched-box">' +
     '<div class="sched-bar"><span>🩺 គ្រូពេទ្យ</span>' +
     (futureMonth ? '' : '<button type="button" onclick="toggleHeaderEditMode()">' + (headerEditMode ? '✅ រួចរាល់' : '✏️ កែប្រែ') + '</button>') + '</div>' +
-    '<div style="overflow-x:auto;"><table class="sched' + (headerEditMode ? ' edit-on' : '') + '" style="--slot-w:' + slotW + 'px;"><thead><tr>' +
+    '<div style="overflow-x:auto;"><table class="sched' + (editModeOn() ? ' edit-on' : '') + '" style="--slot-w:' + slotW + 'px;"><thead><tr>' +
     '<th style="text-align:left;width:118px;">ថ្ងៃ</th>' + headerCells +
     '</tr></thead><tbody>';
 
