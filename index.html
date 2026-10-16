@@ -141,24 +141,24 @@
   .sched-bar button:hover{background:rgba(255,255,255,.34);}
   table.sched thead th{font-size:14px;padding:11px 6px;color:#555f6e;}
   table.sched thead th.group-spv{color:#555f6e;}
-  table.sched tbody td{padding:5px 8px;border-bottom:1px solid var(--line);}
-  table.sched tbody td.date-cell{width:118px;min-width:118px;font-size:12.5px;padding-left:10px !important;}
+  table.sched tbody td{padding:var(--td-pv,5px) 8px;border-bottom:1px solid var(--line);}
+  table.sched tbody td.date-cell{width:var(--date-w,118px);min-width:var(--date-w,118px);font-size:12.5px;padding-left:10px !important;}
   td.date-cell .dow{display:inline;margin-left:4px;font-size:11px;}
   table.sched tbody tr.weekend{background:#fdeaea;}
   table.sched tbody tr.weekend td.date-cell{background:#f28b8b;color:#fff;}
   table.sched tbody tr.weekend td.date-cell .dow{color:#fff;}
   table.sched tbody tr.today td.date-cell{background:#ffe27a;color:#1c2430;}
   .grp-cell{justify-content:flex-start;gap:6px;}
-  table.sched thead th.group-spv, table.sched tbody td.grp-td{border-left:2px solid #c3cddd;padding-left:16px !important;padding-right:16px !important;}
-  table.sched tbody td.grp-td{padding-top:7px;padding-bottom:7px;}
-  .grp-cell .cell-slot{min-height:34px;border-radius:10px;padding:7px 10px;font-weight:600;font-size:13px;box-shadow:0 1px 3px rgba(20,25,40,.12);display:flex;align-items:center;justify-content:center;}
+  table.sched thead th.group-spv, table.sched tbody td.grp-td{border-left:2px solid #c3cddd;padding-left:14px !important;padding-right:14px !important;}
+  table.sched tbody td.grp-td{padding-top:var(--td-pv,7px);padding-bottom:var(--td-pv,7px);}
+  .grp-cell .cell-slot{min-height:var(--chip-h,34px);border-radius:10px;padding:var(--pad-v,7px) var(--pad,10px);font-weight:600;font-size:var(--fs,13px);box-shadow:0 1px 3px rgba(20,25,40,.12);display:flex;align-items:center;justify-content:center;}
   .grp-cell .cell-slot.empty{box-shadow:none;}
   .grp-cell .cell-slot.plus, .grp-cell .slot-add{border-radius:10px;}
   .grp-cell .slot-add{min-height:36px;}
   .grp-cell .cell-slot{position:relative;}
   .chip-x{position:static;transform:none;margin-left:6px;color:#e05252;font-size:12px;font-weight:700;cursor:pointer;padding:0 2px;line-height:1;}
   .chip-x:hover{background:rgba(255,255,255,.55);border-radius:4px;}
-  .add-circle{display:none;width:28px;height:28px;border-radius:50%;border:1px dashed #c3cad6;color:#4a7be0;align-items:center;justify-content:center;cursor:pointer;font-size:14px;font-weight:600;flex-shrink:0;}
+  .add-circle{display:none;width:min(28px,var(--chip-h,28px));height:min(28px,var(--chip-h,28px));border-radius:50%;border:1px dashed #c3cad6;color:#4a7be0;align-items:center;justify-content:center;cursor:pointer;font-size:14px;font-weight:600;flex-shrink:0;}
   .add-circle:hover{background:var(--spv-bg);border-color:var(--brand);}
   /* ប៊ូតុង + មូលក្នុងជួរត្រូវបានលុប — ប្រើតែ + លើក្បាលតារាង */
   table.sched.edit-on .add-circle.add-wait{display:none;}
@@ -169,7 +169,7 @@
   .hdr-add:hover{background:var(--brand);color:#fff;}
   table.sched.edit-on .hdr-add{display:inline-block;}
   table.sched.edit-on .grp-cell .cell-slot.first-empty{display:none;}
-  .grp-cell .cell-slot.slot-box, .grp-cell .cell-ph{width:var(--slot-w,120px);min-height:34px;border-radius:10px;border:1px dashed #c3cad6;background:#fff;box-shadow:none;box-sizing:border-box;cursor:pointer;flex-shrink:0;}
+  .grp-cell .cell-slot.slot-box, .grp-cell .cell-ph{width:var(--slot-w,120px);min-height:var(--chip-h,34px);border-radius:10px;border:1px dashed #c3cad6;background:#fff;box-shadow:none;box-sizing:border-box;cursor:pointer;flex-shrink:0;}
   .grp-cell .cell-slot, .grp-cell .cell-ph{flex:0 0 var(--slot-w,120px);width:var(--slot-w,120px);max-width:var(--slot-w,120px);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
   .grp-cell{min-width:0;}
   .grp-cell .cell-slot.slot-box:hover, .grp-cell .cell-ph:hover{background:var(--spv-bg);border-color:var(--brand);}
@@ -235,6 +235,9 @@
     .card{ box-shadow:none !important; padding:0 !important; margin:0 !important; border-radius:0 !important; }
     #scheduleWrap > div, .sched-box > div{ overflow: visible !important; }
     table.sched thead th{ position:static !important; }
+    table.sched{ --chip-h:15px !important; --td-pv:1px !important; --fs:9px !important; --pad-v:1px !important; --pad:4px !important; --date-w:90px !important; }
+    table.sched tbody td.date-cell{ font-size:9px !important; }
+    table.sched thead th{ padding:3px 4px !important; font-size:10px !important; }
     .col-add, .col-move, .col-del{ display:none !important; }
     .cell-slot.plus, .slot-add{ visibility:hidden !important; }
   }
@@ -1028,6 +1031,7 @@ function renderSchedule() {
 
   var groups = nameGroups(cols);
   var textCols = cols.filter(function (c) { return c.type === 'text'; });
+  var _fitInfo = { dateW: 118, fs: 13, pad: 10, chipH: 34, tdPv: 5, padV: 7 };
   var slotW = computeSlotWidth(cols, y, m);
   // ឲ្យឃើញទាំងអស់ក្នុងទំព័រតែមួយ៖ បង្រួមទទឹងប្រអប់ (ស្មើគ្នាទាំងអស់) បើវែងលើសទទឹងអេក្រង់
   (function () {
@@ -1041,9 +1045,21 @@ function renderSchedule() {
       nSum += Math.max(1, n);
     });
     var textW = cols.filter(function (c) { return c.type === 'text'; }).length * 130;
-    var avail = (W - 4 - 118 - textW - 28 * gs.length - 6 * nSum) / Math.max(1, nSum);
+    var dateW = W < 640 ? 84 : 118;
+    var avail = (W - 4 - dateW - textW - 28 * gs.length - 6 * nSum) / Math.max(1, nSum);
     var fit = Math.floor(avail);
-    if (fit < slotW) slotW = Math.max(56, fit);
+    if (fit < slotW) slotW = Math.max(48, fit);
+    _fitInfo = { chipH: 34, tdPv: 5, padV: 7, dateW: dateW, fs: slotW < 70 ? 10 : (slotW < 100 ? 11 : 13), pad: slotW < 100 ? 4 : 10 };
+    // បណ្តោយ៖ បែងចែកកម្ពស់អេក្រង់ទៅតាមចំនួនថ្ងៃ ឲ្យឃើញទាំងខែក្នុងទំព័រតែមួយ
+    var topAbs = wrapEl.getBoundingClientRect().top + (window.pageYOffset || 0);
+    var availH = (window.innerHeight || 900) - topAbs - 8 - 40 - 38; // ទុកសម្រាប់ក្បាលខៀវ + ក្បាលតារាង
+    var rowH = Math.floor(availH / Math.max(28, nDays));
+    rowH = Math.max(22, Math.min(46, rowH));
+    var tdPv = rowH >= 40 ? 5 : (rowH >= 30 ? 3 : 2);
+    var chipH = rowH - tdPv * 2 - 1;
+    _fitInfo.chipH = chipH; _fitInfo.tdPv = tdPv;
+    _fitInfo.fs = Math.min(_fitInfo.fs, Math.max(9, chipH - 9));
+    if (chipH < 28) _fitInfo.padV = 1; 
   })();
   var gw = 0;
 
@@ -1062,8 +1078,8 @@ function renderSchedule() {
     '<div class="sched-box">' +
     '<div class="sched-bar"><span>🩺 គ្រូពេទ្យ</span>' + barGroupTools(groups) +
     (futureMonth ? '' : '<button type="button" onclick="toggleHeaderEditMode()">' + (headerEditMode ? '✅ រួចរាល់' : '✏️ កែប្រែ') + '</button>') + '</div>' +
-    '<div style="overflow-x:auto;"><table class="sched' + (editModeOn() ? ' edit-on' : '') + '" style="--slot-w:' + slotW + 'px;"><thead><tr>' +
-    '<th style="text-align:left;width:118px;">ថ្ងៃ</th>' + headerCells +
+    '<div style="overflow-x:auto;"><table class="sched' + (editModeOn() ? ' edit-on' : '') + '" style="--slot-w:' + slotW + 'px;--fs:' + _fitInfo.fs + 'px;--pad:' + _fitInfo.pad + 'px;--date-w:' + _fitInfo.dateW + 'px;--chip-h:' + _fitInfo.chipH + 'px;--td-pv:' + _fitInfo.tdPv + 'px;--pad-v:' + _fitInfo.padV + 'px;"><thead><tr>' +
+    '<th style="text-align:left;width:' + _fitInfo.dateW + 'px;">ថ្ងៃ</th>' + headerCells +
     '</tr></thead><tbody>';
 
   for (var d = 1; d <= nDays; d++) {
