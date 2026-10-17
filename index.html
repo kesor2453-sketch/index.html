@@ -807,6 +807,7 @@ function renderSchedule() {
     var dowName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow];
     var isWeekend = (dow === 0 || dow === 6);
     var row = rowForDate(dateStr) || { Date: dateStr };
+    if (!STATE.editing) sortRowAllGroups(row, cols);
     var isAutoOff = rowIsAutoOff(row, cols);
 
     var trClasses = [];
@@ -1046,6 +1047,20 @@ function sortRowGroup(row, ym, field) {
   var empties = values.length - filled.length;
   for (var i = 0; i < empties; i++) filled.push('');
   group.forEach(function (c, i) { row[c.id] = filled[i]; });
+}
+// តម្រៀបគ្រប់ក្រុមក្នុងជួរថ្ងៃតែមួយ (ប្រើពេលបង្ហាញ — ទិន្នន័យចាស់ក៏តម្រៀបតាម alphabet ដែរ)
+function sortRowAllGroups(row, cols) {
+  var seen = {};
+  cols.forEach(function (c) {
+    if (c.type !== 'name' || seen[c.label]) return;
+    seen[c.label] = true;
+    var group = cols.filter(function (x) { return x.type === 'name' && x.label === c.label; });
+    if (group.length < 2) return;
+    var values = group.map(function (x) { return row[x.id] || ''; });
+    var filled = values.filter(function (v) { return v; }).sort(compareDoctorNames);
+    while (filled.length < values.length) filled.push('');
+    group.forEach(function (x, i) { if (filled[i] || row[x.id]) row[x.id] = filled[i]; });
+  });
 }
 // ក្រឡាទទេដំបូងក្នុងជួរថ្ងៃ (ក្នុងចំណោមជួរឈរឈ្មោះ) — សម្រាប់លោតបំពេញបន្ត
 function firstEmptyNameField(date) {
