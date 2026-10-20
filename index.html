@@ -230,6 +230,8 @@
         </div>
         <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
+          <button type="button" class="today-btn no-print" onclick="exportBackup()" title="ទាញទិន្នន័យទាំងអស់ជាឯកសារ JSON">⬇ Backup</button>
+          <label class="today-btn no-print" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ backup ចូលវិញ">⬆ Restore<input type="file" accept="application/json,.json" style="display:none" onchange="importBackup(this)"></label>
         </div>
       </div>
       <div id="scheduleWrap"></div>
@@ -525,7 +527,9 @@ function seedDefaultDoctors() {
   ];
 }
 
+var dataLoaded = false; // true តែពេលបានទទួលទិន្នន័យពិតពី Firestore ហើយ — ការពារកុំឲ្យជាន់ទិន្នន័យដោយទិន្នន័យទទេ
 function persistRemoteState() {
+  if (!dataLoaded) { showToast('⚠ ទិន្នន័យមិនទាន់ផ្ទុកពី Firestore ទេ — មិនរក្សាទុកដើម្បីការពារទិន្នន័យ'); return; }
   setDoc(scheduleDocRef, {
     doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columnsByMonth: STATE.columnsByMonth,
     columnsTemplate: STATE.columnsTemplate, doctorPhones: STATE.doctorPhones,
@@ -536,6 +540,64 @@ function persistRemoteState() {
 }
 
 var firstSnapshotHandled = false;
+
+// ច្បាប់ចម្លងសុវត្ថិភាពក្នុង browser (៣ ច្បាប់ចុងក្រោយ ពេលមានទិន្នន័យពិត)
+function currentBackupObject() {
+  return { savedAt: new Date().toISOString(), doctors: STATE.doctors, scheduleAll: STATE.scheduleAll,
+    columnsByMonth: STATE.columnsByMonth, columnsTemplate: STATE.columnsTemplate,
+    doctorPhones: STATE.doctorPhones, unlockedMonths: STATE.unlockedMonths };
+}
+function saveLocalSafetyCopy() {
+  try {
+    if (!STATE.scheduleAll || !STATE.scheduleAll.length) return;
+    var list = JSON.parse(localStorage.getItem('rosterSafetyCopies') || '[]');
+    var json = JSON.stringify(currentBackupObject());
+    if (list.length && list[list.length - 1].json === json) return;
+    list.push({ t: new Date().toISOString(), json: json });
+    while (list.length > 3) list.shift();
+    localStorage.setItem('rosterSafetyCopies', JSON.stringify(list));
+  } catch (e) { /* ignore */ }
+}
+function exportBackup() {
+  var blob = new Blob([JSON.stringify(currentBackupObject(), null, 1)], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'roster-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function importBackup(input) {
+  var f = input.files && input.files[0];
+  if (!f) return;
+  var rd = new FileReader();
+  rd.onload = function () {
+    try {
+      var d = JSON.parse(rd.result);
+      if (!d || !Array.isArray(d.scheduleAll)) throw new Error('ឯកសារមិនត្រឹមត្រូវ');
+      if (!window.confirm('ដាក់ទិន្នន័យពី backup ចូលជំនួសទិន្នន័យបច្ចុប្បន្នទាំងអស់? (' + d.scheduleAll.length + ' ថ្ងៃ)')) return;
+      STATE.doctors = d.doctors || []; STATE.scheduleAll = d.scheduleAll;
+      STATE.columnsByMonth = d.columnsByMonth || {};
+      STATE.columnsTemplate = d.columnsTemplate && d.columnsTemplate.length ? d.columnsTemplate : JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+      STATE.doctorPhones = d.doctorPhones || []; STATE.unlockedMonths = d.unlockedMonths || {};
+      dataLoaded = true;
+      persistRemoteState(); renderSchedule(); renderDoctors();
+      showToast('ដាក់ទិន្នន័យចូលវិញរួចរាល់ ✓');
+    } catch (e) { showToast('⚠ ' + e.message); }
+    input.value = '';
+  };
+  rd.readAsText(f);
+}
+window.exportBackup = exportBackup; window.importBackup = importBackup;
+window.showSafetyCopies = function () {
+  try {
+    var list = JSON.parse(localStorage.getItem('rosterSafetyCopies') || '[]');
+    if (!list.length) { showToast('មិនមានច្បាប់ចម្លងក្នុង browser នេះទេ'); return; }
+    var last = list[list.length - 1];
+    if (!window.confirm('ទាញច្បាប់ចម្លងក្នុង browser នេះ (' + last.t.slice(0, 16).replace('T', ' ') + ') ជា backup ឯកសារ?')) return;
+    var blob = new Blob([last.json], { type: 'application/json' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'roster-local-copy.json'; document.body.appendChild(a); a.click(); a.remove();
+  } catch (e) { showToast('⚠ មិនអាចអានបាន'); }
+};
 
 document.addEventListener('DOMContentLoaded', function () {
   bindTabs();
@@ -556,6 +618,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   onSnapshot(scheduleDocRef, function (snap) {
     if (snap.exists()) {
+      dataLoaded = true;
       var data = snap.data();
       STATE.doctors = data.doctors || [];
       STATE.scheduleAll = data.scheduleAll || [];
@@ -568,7 +631,15 @@ document.addEventListener('DOMContentLoaded', function () {
       var didReorder = enforceMiscLastAllMonths();
       enforceMiscLast(STATE.columnsTemplate);
       if (didMigrate || didReorder) persistRemoteState();
+      saveLocalSafetyCopy();
     } else if (!firstSnapshotHandled) {
+      // ប្រសិនបើ snapshot មកពី cache ទទេ (ក្រៅបណ្តាញ/ទើបបើក) → មិនត្រូវបង្កើតទិន្នន័យទទេ ហើយជាន់លើ Firestore ទេ
+      if (snap.metadata && snap.metadata.fromCache) {
+        document.getElementById('scheduleWrap').innerHTML =
+          '<div class="loading"><span class="spinner"></span> កំពុងរង់ចាំទិន្នន័យពី Firestore... (សូមពិនិត្យអ៊ីនធឺណិត)</div>';
+        return;
+      }
+      dataLoaded = true;
       STATE.doctors = seedDefaultDoctors();
       STATE.columnsByMonth = {};
       STATE.columnsTemplate = JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
