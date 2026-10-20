@@ -206,7 +206,7 @@
   <header class="top">
     <div>
       <h1>កាលវិភាគគ្រូពេទ្យ (SOPHEAK VISAL CLINIC)</h1>
-      <div class="muted">ឧបករណ៍/អ្នកកែ៖ <span id="deviceNameLabel">—</span></div>
+      <div class="muted">ឧបករណ៍/អ្នកកែ៖ <span id="deviceNameLabel">—</span> <button type="button" id="ownerBtn" onclick="ownerButtonClick()" style="border:1px solid #d6dbe6;background:#fff3e0;border-radius:999px;padding:3px 10px;font-family:inherit;font-size:12px;cursor:pointer;">🔒 មើលតែប៉ុណ្ណោះ · ចូលជាម្ចាស់</button> <button type="button" id="openEditBtn" onclick="toggleEditOpen()" style="display:none;border:1px solid #d6dbe6;border-radius:999px;padding:3px 10px;font-family:inherit;font-size:12px;cursor:pointer;">🔴 បិទ</button></div>
     </div>
     <div class="tabs">
       <div class="tab active" data-panel="panel-schedule">កាលវិភាគ</div>
@@ -305,6 +305,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   initializeFirestore, persistentLocalCache, doc, setDoc, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -325,9 +326,21 @@ var firebaseConfig = {
 // Sheet via Apps Script. Leave as-is (or blank) to skip that entirely.
 var APPS_SCRIPT_URL = '';
 
+// ===== ម្ចាស់តែម្នាក់ដែលអាចកែបាន =====
+// ដាក់ Gmail របស់អ្នក (អក្សរតូច) ក្នុងបញ្ជីនេះ។ អ្នកផ្សេងមើលបានតែប៉ុណ្ណោះ។
+// ⚠ ត្រូវកំណត់ Firestore Rules ដូចគ្នាផង (សូមមើលការណែនាំ) ទើបមានសុវត្ថិភាពពិត។
+var OWNER_EMAILS = ['PUT_YOUR_GMAIL@gmail.com'];
+var isOwner = false;
+var ownerEmail = '';
+
 var fbApp = initializeApp(firebaseConfig);
+var auth = getAuth(fbApp);
 var db = initializeFirestore(fbApp, { localCache: persistentLocalCache() });
-var scheduleDocRef = doc(db, 'scheduleApp', 'main');
+// ?doc=ឈ្មោះ — ប្រើសម្រាប់មើល/ទាញទិន្នន័យពី document ផ្សេងក្នុង scheduleApp (ឧ. ?doc=chariya-sopheak)
+var DOC_ID = 'main';
+try { var _q = new URLSearchParams(location.search).get('doc'); if (_q && /^[A-Za-z0-9_-]{1,60}$/.test(_q)) DOC_ID = _q; } catch (e) {}
+var scheduleDocRef = doc(db, 'scheduleApp', DOC_ID);
+var settingsDocRef = doc(db, 'scheduleApp', 'settings');
 
 var RATES = { SPV_Day1: 25, SPV_Day2: 25, SPV_Day3: 25, SPV_Night: 25 };
 var KHR_PER_USD = 4000;
@@ -492,6 +505,7 @@ function scheduleMonthLocked() {
   return isPastMonthKey(key) && !STATE.unlockedMonths[key];
 }
 function toggleScheduleLock() {
+  if (!requireOwner()) return;
   var key = currentScheduleMonthKey();
   STATE.unlockedMonths[key] = !STATE.unlockedMonths[key];
   persistRemoteState();
@@ -527,8 +541,58 @@ function seedDefaultDoctors() {
   ];
 }
 
+var editOpen = false; // ម្ចាស់បើកឲ្យគ្រប់គ្នាបំពេញបាន (រក្សាក្នុង scheduleApp/settings)
+function canEdit() { return isOwner || editOpen; }
+function requireEdit() {
+  if (canEdit()) return true;
+  showToast('👁 មើលបានតែប៉ុណ្ណោះ — ម្ចាស់មិនទាន់បើកឲ្យកែទេ');
+  return false;
+}
+function renderEditOpenButton() {
+  var b = document.getElementById('openEditBtn');
+  if (!b) return;
+  b.style.display = isOwner ? 'inline-block' : 'none';
+  b.textContent = editOpen ? '🟢 កំពុងបើកឲ្យគ្រប់គ្នាបំពេញ (ចុចដើម្បីបិទ)' : '🔴 បិទ — ចុចដើម្បីបើកឲ្យគ្រប់គ្នាបំពេញ';
+  b.style.background = editOpen ? '#e8f5e9' : '#fdeaea';
+}
+function toggleEditOpen() {
+  if (!requireOwner()) return;
+  setDoc(settingsDocRef, { editOpen: !editOpen }).catch(function (err) { showToast('⚠ ' + err.message); });
+}
+window.toggleEditOpen = toggleEditOpen;
+function requireOwner() {
+  if (isOwner) return true;
+  showToast('👁 មើលបានតែប៉ុណ្ណោះ — សូមចុច "ចូលជាម្ចាស់" ដើម្បីកែ');
+  return false;
+}
+function renderOwnerButton() {
+  var btn = document.getElementById('ownerBtn');
+  if (!btn) return;
+  btn.textContent = isOwner ? ('🔓 ម្ចាស់៖ ' + ownerEmail + ' (ចាកចេញ)') : '🔒 មើលតែប៉ុណ្ណោះ · ចូលជាម្ចាស់';
+  btn.style.background = isOwner ? '#e8f5e9' : '#fff3e0';
+}
+function ownerButtonClick() {
+  if (isOwner) { signOut(auth); return; }
+  signInWithPopup(auth, new GoogleAuthProvider()).then(function (res) {
+    var em = String((res.user && res.user.email) || '').toLowerCase();
+    if (OWNER_EMAILS.map(function (x) { return x.toLowerCase(); }).indexOf(em) === -1) {
+      showToast('⚠ ' + em + ' មិនមែនជាម្ចាស់ទេ — មើលបានតែប៉ុណ្ណោះ');
+      signOut(auth);
+    }
+  }).catch(function (err) { showToast('⚠ ចូលមិនបាន៖ ' + err.message); });
+}
+window.ownerButtonClick = ownerButtonClick;
+onAuthStateChanged(auth, function (user) {
+  var em = user && user.email ? String(user.email).toLowerCase() : '';
+  isOwner = !!em && OWNER_EMAILS.map(function (x) { return x.toLowerCase(); }).indexOf(em) !== -1;
+  ownerEmail = isOwner ? em : '';
+  renderOwnerButton(); renderEditOpenButton();
+  try { if (typeof renderSchedule === 'function' && firstSnapshotHandled) { renderSchedule(); renderDoctors(); renderPhoneDirectory(); } } catch (e) {}
+});
+
 var dataLoaded = false; // true តែពេលបានទទួលទិន្នន័យពិតពី Firestore ហើយ — ការពារកុំឲ្យជាន់ទិន្នន័យដោយទិន្នន័យទទេ
 function persistRemoteState() {
+  if (!canEdit()) return; // មិនមានសិទ្ធិសរសេរ
   if (!dataLoaded) { showToast('⚠ ទិន្នន័យមិនទាន់ផ្ទុកពី Firestore ទេ — មិនរក្សាទុកដើម្បីការពារទិន្នន័យ'); return; }
   setDoc(scheduleDocRef, {
     doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columnsByMonth: STATE.columnsByMonth,
@@ -566,6 +630,7 @@ function exportBackup() {
   document.body.appendChild(a); a.click(); a.remove();
 }
 function importBackup(input) {
+  if (!requireOwner()) return;
   var f = input.files && input.files[0];
   if (!f) return;
   var rd = new FileReader();
@@ -615,6 +680,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
   document.getElementById('scheduleWrap').innerHTML =
     '<div class="loading"><span class="spinner"></span> កំពុងភ្ជាប់ Firestore...</div>';
+  if (DOC_ID !== 'main') showToast('⚠ កំពុងមើល document: ' + DOC_ID + ' — កុំកែ ប្រើតែ ⬇ Backup ដើម្បីទាញទិន្នន័យ');
+
+  onSnapshot(settingsDocRef, function (ss) {
+    editOpen = !!(ss.exists() && ss.data().editOpen);
+    renderEditOpenButton();
+  }, function () { /* ignore */ });
 
   onSnapshot(scheduleDocRef, function (snap) {
     if (snap.exists()) {
@@ -906,6 +977,7 @@ function renderSchedule() {
 }
 
 function moveColumn(id, delta) {
+  if (!requireOwner()) return;
   var cols = getColumnsForMonth(currentScheduleMonthKey());
   var idx = cols.findIndex(function (c) { return c.id === id; });
   var newIdx = idx + delta;
@@ -919,6 +991,7 @@ function moveColumn(id, delta) {
 window.moveColumn = moveColumn;
 
 function onColDragStart(e, id) {
+  if (!requireOwner()) return;
   dragColId = id;
   e.dataTransfer.effectAllowed = 'move';
 }
@@ -930,6 +1003,7 @@ function onColDragOver(e) {
 window.onColDragOver = onColDragOver;
 
 function onColDrop(e, targetId) {
+  if (!requireOwner()) return;
   e.preventDefault();
   if (!dragColId || dragColId === targetId) { dragColId = null; return; }
   var cols = getColumnsForMonth(currentScheduleMonthKey());
@@ -947,12 +1021,14 @@ function onColDrop(e, targetId) {
 window.onColDrop = onColDrop;
 
 function toggleHeaderEditMode() {
+  if (!requireOwner()) return;
   headerEditMode = !headerEditMode;
   renderSchedule();
 }
 window.toggleHeaderEditMode = toggleHeaderEditMode;
 
 function renameColumn(inputEl) {
+  if (!requireOwner()) return;
   var id = inputEl.dataset.colid;
   var newLabel = inputEl.value.trim();
   var col = columnById(id);
@@ -965,6 +1041,7 @@ function renameColumn(inputEl) {
 window.renameColumn = renameColumn;
 
 function addColumn() {
+  if (!requireOwner()) return;
   var ym = currentScheduleMonthKey();
   var cols = getColumnsForMonth(ym);
   var nameCols = cols.filter(function (c) { return c.type === 'name'; });
@@ -992,6 +1069,7 @@ function addColumn() {
 window.addColumn = addColumn;
 
 function deleteColumn(id) {
+  if (!requireOwner()) return;
   var ym = currentScheduleMonthKey();
   var cols = getColumnsForMonth(ym);
   if (cols.length <= 1) { showToast('ត្រូវមានយ៉ាងហោចណាស់ ១ជួរឈរ'); return; }
@@ -1221,6 +1299,7 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra) {
 }
 
 function openEditor(cell) {
+  if (!requireEdit()) return;
   if (STATE.editing) return;
   if (scheduleMonthLocked()) {
     showToast('🔒 ខែនេះត្រូវបានចាក់សោ (ខែបានបញ្ចប់ហើយ) — ចុច "🔓 កែប្រែខែនេះ" ដើម្បីកែ');
@@ -1388,6 +1467,7 @@ function renderDoctors() {
 }
 
 function deleteDoctor(id) {
+  if (!requireOwner()) return;
   var doc = STATE.doctors.filter(function (d) { return d.ID === id; })[0];
   if (!doc) return;
   if (!window.confirm('លុបគ្រូពេទ្យ "' + doc.NameSPV + '" ចេញពីបញ្ជី? (ការកំណត់វេនចាស់ក្នុងកាលវិភាគនឹងមិនត្រូវបានលុបចោលទេ គ្រាន់តែយកគាត់ចេញពីបញ្ជីគ្រូពេទ្យសម្រាប់ជ្រើសរើសនាពេលក្រោយប៉ុណ្ណោះ)')) return;
@@ -1400,12 +1480,14 @@ function deleteDoctor(id) {
 window.deleteDoctor = deleteDoctor;
 
 function toggleDoctorDeleteMode() {
+  if (!requireOwner()) return;
   doctorDeleteMode = !doctorDeleteMode;
   renderDoctors();
 }
 window.toggleDoctorDeleteMode = toggleDoctorDeleteMode;
 
 function toggleDoctorEditMode() {
+  if (!requireOwner()) return;
   if (doctorEditMode) {
     // Currently in edit mode — this click means "save all".
     var changedCount = 0;
@@ -1448,6 +1530,7 @@ window.toggleDoctorEditMode = toggleDoctorEditMode;
 function bindDoctorForm() {
   document.getElementById('addDocForm').addEventListener('submit', function (e) {
     e.preventDefault();
+    if (!requireOwner()) return;
     var name = document.getElementById('newName').value.trim();
     if (!name) { showToast('សូមបញ្ចូលឈ្មោះ'); return; }
 
@@ -1512,6 +1595,7 @@ function renderPhoneDirectory() {
 }
 
 function updatePhoneEntry(inputEl) {
+  if (!requireOwner()) return;
   var id = inputEl.dataset.id;
   var field = inputEl.dataset.field;
   var entry = STATE.doctorPhones.filter(function (p) { return p.id === id; })[0];
@@ -1523,6 +1607,7 @@ function updatePhoneEntry(inputEl) {
 window.updatePhoneEntry = updatePhoneEntry;
 
 function deletePhoneEntry(id) {
+  if (!requireOwner()) return;
   var entry = STATE.doctorPhones.filter(function (p) { return p.id === id; })[0];
   if (!entry) return;
   if (!window.confirm('លុបលេខទូរស័ព្ទរបស់ "' + entry.name + '"?')) return;
@@ -1538,6 +1623,7 @@ function bindPhoneForm() {
   if (!form) return;
   form.addEventListener('submit', function (e) {
     e.preventDefault();
+    if (!requireOwner()) return;
     var name = document.getElementById('newPhoneName').value.trim();
     var phone = document.getElementById('newPhoneNumber').value.trim();
     if (!name || !phone) { showToast('សូមជ្រើសរើសគ្រូពេទ្យ និងបញ្ចូលលេខទូរស័ព្ទ'); return; }
