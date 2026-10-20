@@ -80,7 +80,7 @@
     white-space:nowrap;
   }
   table.sched thead th.group-spv{color:var(--spv);}
-  table.sched th.grp-start, table.sched td.grp-start{border-left:3px solid #8fa3c4;}
+  table.sched th.grp-start, table.sched td.grp-start{border-left:10px solid #dfe8f6;box-shadow:inset 1px 0 0 #8fa3c4;}
   /* ស៊ុមតារាងឲ្យស្អាត */
   #scheduleWrap > div{border:1.5px solid #b9c6dc;border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 10px rgba(30,60,120,.07);}
   table.sched{border-collapse:separate;border-spacing:0;}
@@ -95,7 +95,7 @@
   table.sched tbody td.date-cell{background:#f7f9fd;border-right:1.5px solid #b9c6dc;color:#1c2a44;}
   table.sched tbody tr.weekend td.date-cell{background:#fdecec;}
   table.sched tbody tr:nth-child(even):not(.weekend):not(.today) td:not(.date-cell){background:#fbfcfe;}
-  table.sched th.grp-start, table.sched td.grp-start{border-left:3px solid #8fa3c4;}
+  table.sched th.grp-start, table.sched td.grp-start{border-left:10px solid #dfe8f6;box-shadow:inset 1px 0 0 #8fa3c4;}
   .col-del{
     display:inline-block;color:var(--off);font-weight:700;font-size:14px;cursor:pointer;
     margin-left:4px;padding:0 3px;border-radius:4px;
@@ -198,6 +198,21 @@
     #scheduleWrap > div{ overflow: visible !important; }
     table.sched thead th{ position:static !important; }
     .col-add, .col-move, .col-del{ display:none !important; }
+    /* ព្រីនឲ្យចូលតែ ១ ទំព័រ */
+    html, body{ height:auto !important; }
+    #app{ padding:0 !important; max-width:none !important; }
+    .month-nav{ margin:0 0 2px !important; padding:0 !important; }
+    .month-nav button, .month-nav .today-btn, .legend{ display:none !important; }
+    .month-nav .month-label{ font-size:13px !important; }
+    #scheduleWrap > div{ border-radius:0 !important; box-shadow:none !important; border-width:1px !important; }
+    table.sched{ width:100% !important; font-size:9.5px !important; page-break-inside:avoid; break-inside:avoid; }
+    table.sched thead th{ padding:2px 3px !important; font-size:9.5px !important; }
+    table.sched tbody td{ padding:0 2px !important; height:auto !important; line-height:1.15 !important; }
+    table.sched tbody td.date-cell{ padding-left:4px !important; white-space:nowrap; }
+    td.date-cell .dow{ display:inline !important; margin-left:4px; font-size:8px !important; }
+    .cell-slot{ min-height:0 !important; padding:1px 2px !important; font-size:9.5px !important; line-height:1.15 !important; border:none !important; }
+    table.sched th.grp-start, table.sched td.grp-start{ border-left-width:5px !important; }
+    tr{ page-break-inside:avoid; }
   }
 </style>
 </head>
@@ -232,6 +247,7 @@
         </div>
         <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
+          <span id="colTools" class="no-print" style="display:none;"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
           <button type="button" class="today-btn no-print" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
           <label class="today-btn no-print" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ Sheet (.xlsx) ចូលវិញ">⬆ Restore<input type="file" accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importBackup(this)"></label>
         </div>
@@ -582,6 +598,7 @@ function renderOwnerButton() {
   btn.textContent = isOwner ? '🔓 Admin' : '🔒 Admin';
   btn.title = isOwner ? ('ចូលជាម្ចាស់៖ ' + ownerEmail + ' — ចុចដើម្បីចាកចេញ') : 'មើលតែប៉ុណ្ណោះ — ចុចដើម្បីចូលជាម្ចាស់';
   btn.classList.toggle('on', !!isOwner);
+  var ct = document.getElementById('colTools'); if (ct) ct.style.display = isOwner ? 'inline' : 'none';
 }
 function ownerButtonClick() {
   if (isOwner) { signOut(auth); return; }
@@ -732,27 +749,38 @@ function unionKeys(list, skip) {
 function exportBackup() {
   loadXlsxLib(function () {
     var b = currentBackupObject();
-    var ids = [], labelOf = {};
-    function addCols(list) { (list || []).forEach(function (c) { if (ids.indexOf(c.id) === -1) ids.push(c.id); labelOf[c.id] = c.label; }); }
-    Object.keys(b.columnsByMonth || {}).sort().forEach(function (ym) { addCols(b.columnsByMonth[ym]); });
-    addCols(b.columnsTemplate);
-    unionKeys(b.scheduleAll, ['Date', '_log']).forEach(function (k) { if (ids.indexOf(k) === -1) ids.push(k); });
-
+    function monthCols(ym) {
+      var c = (b.columnsByMonth || {})[ym];
+      if (!c || !c.length) c = (b.columnsTemplate && b.columnsTemplate.length) ? b.columnsTemplate : DEFAULT_COLUMNS;
+      return c.filter(function (x) { return x.type === 'name'; });
+    }
     var rows = b.scheduleAll.slice().sort(function (x, y) { return String(x.Date).localeCompare(String(y.Date)); });
-    var sched = [['Date'].concat(ids), ['កាលបរិច្ឆេទ'].concat(ids.map(function (id) { return labelOf[id] || ''; }))];
-    rows.forEach(function (r) { sched.push([r.Date].concat(ids.map(function (id) { return r[id] == null ? '' : String(r[id]); }))); });
-
-    var colRows = [['month', 'order', 'id', 'label', 'type']];
-    Object.keys(b.columnsByMonth || {}).sort().forEach(function (ym) {
-      b.columnsByMonth[ym].forEach(function (c, i) { colRows.push([ym, i + 1, c.id, c.label, c.type]); });
+    // ចំនួនប្រអប់អតិបរមាក្នុងក្រុមនីមួយៗ (ព្រឹក / យប់ ...) គ្រប់ខែ — ជួរ ផ្សេងៗ មិនដាក់
+    var labelOrder = [], maxCount = {}, months = {};
+    rows.forEach(function (r) { months[String(r.Date).slice(0, 7)] = true; });
+    Object.keys(months).forEach(function (ym) {
+      var cnt = {};
+      monthCols(ym).forEach(function (c) {
+        if (labelOrder.indexOf(c.label) === -1) labelOrder.push(c.label);
+        cnt[c.label] = (cnt[c.label] || 0) + 1;
+      });
+      Object.keys(cnt).forEach(function (l) { maxCount[l] = Math.max(maxCount[l] || 0, cnt[l]); });
     });
-    (b.columnsTemplate || []).forEach(function (c, i) { colRows.push(['_template', i + 1, c.id, c.label, c.type]); });
-
-    var dKeys = unionKeys(b.doctors, []);
-    var docRows = [dKeys].concat((b.doctors || []).map(function (d) { return dKeys.map(function (k) { return d[k] == null ? '' : String(d[k]); }); }));
-    var pKeys = unionKeys(b.doctorPhones, []);
-    var phRows = [pKeys].concat((b.doctorPhones || []).map(function (p) { return pKeys.map(function (k) { return p[k] == null ? '' : String(p[k]); }); }));
-    var meta = [['key', 'value'], ['unlockedMonths', JSON.stringify(b.unlockedMonths || {})], ['savedAt', b.savedAt]];
+    var slots = [];
+    labelOrder.forEach(function (l) { for (var k = 0; k < maxCount[l]; k++) slots.push(l); });
+    var sched = [['កាលបរិច្ឆេទ'].concat(slots)];
+    rows.forEach(function (r) {
+      var cols = monthCols(String(r.Date).slice(0, 7)), used = {};
+      var line = [r.Date];
+      slots.forEach(function (l) {
+        var k = used[l] || 0;
+        var grp = cols.filter(function (c) { return c.label === l; });
+        used[l] = k + 1;
+        var c = grp[k];
+        line.push(c && r[c.id] ? String(r[c.id]) : '');
+      });
+      sched.push(line);
+    });
 
     // ទទឹងជួរ Excel តាមឈ្មោះ/អត្ថបទដែលវែងជាងគេក្នុងជួរនីមួយៗ
     function sheetFit(aoa, maxW) {
@@ -783,8 +811,61 @@ function normDateCell(v) {
   return '';
 }
 
+function restoreBySlots(sched) {
+  var labels = sched[0].slice(1).map(function (x) { return String(x).trim(); });
+  var slotIdx = [], seen = {};
+  labels.forEach(function (l) { slotIdx.push(seen[l] || 0); seen[l] = (seen[l] || 0) + 1; });
+  var oldRows = {};
+  STATE.scheduleAll.forEach(function (r) { oldRows[r.Date] = r; });
+  var plan = []; // [{date, vals:[[label,k,value]]}]
+  for (var i = 1; i < sched.length; i++) {
+    var date = normDateCell(sched[i][0]);
+    if (!date) continue;
+    var vals = [];
+    labels.forEach(function (l, c) { var v = sched[i][c + 1]; if (l && v !== '' && v != null) vals.push([l, slotIdx[c], String(v)]); });
+    plan.push({ date: date, vals: vals });
+  }
+  if (!plan.length) throw new Error('រកមិនឃើញជួរកាលវិភាគក្នុងឯកសារទេ');
+  if (!window.confirm('ជំនួសកាលវិភាគទាំងអស់ដោយទិន្នន័យពី Sheet? (' + plan.length + ' ថ្ងៃ) — គ្រូពេទ្យ និងលេខទូរស័ព្ទមិនប្រែប្រួលទេ')) return;
+  // ចំនួនប្រអប់ត្រូវការ ក្នុងខែនីមួយៗ ក្នុងក្រុមនីមួយៗ
+  var need = {};
+  plan.forEach(function (p) {
+    var ym = p.date.slice(0, 7);
+    need[ym] = need[ym] || {};
+    p.vals.forEach(function (v) { need[ym][v[0]] = Math.max(need[ym][v[0]] || 0, v[1] + 1); });
+  });
+  Object.keys(need).forEach(function (ym) {
+    var cols = getColumnsForMonth(ym);
+    Object.keys(need[ym]).forEach(function (l) {
+      var have = cols.filter(function (c) { return c.type === 'name' && c.label === l; }).length;
+      for (var k = have; k < need[ym][l]; k++) {
+        var nc = { id: 'col_' + Date.now() + '_' + Math.floor(Math.random() * 1e6), label: l, type: 'name' };
+        var ti = cols.findIndex(function (c) { return c.type === 'text'; });
+        if (ti === -1) cols.push(nc); else cols.splice(ti, 0, nc);
+      }
+    });
+  });
+  var newRows = plan.map(function (p) {
+    var ym = p.date.slice(0, 7), cols = getColumnsForMonth(ym);
+    var row = { Date: p.date };
+    p.vals.forEach(function (v) {
+      var grp = cols.filter(function (c) { return c.type === 'name' && c.label === v[0]; });
+      var c = grp[v[1]];
+      if (c) row[c.id] = v[2];
+    });
+    if (oldRows[p.date] && oldRows[p.date]._log) row._log = oldRows[p.date]._log;
+    return row;
+  });
+  STATE.scheduleAll = newRows;
+  dataLoaded = true;
+  persistRemoteState(); renderSchedule();
+  showToast('ដាក់កាលវិភាគចូលវិញរួចរាល់ ✓');
+}
+
 // Restore ពី Sheet ដែលមានតែផ្ទាំង Schedule — ជំនួសតែកាលវិភាគ (គ្រូពេទ្យ លេខទូរស័ព្ទ និងជួរឈរដែលមានស្រាប់នៅដដែល)
 function restoreScheduleOnly(sched) {
+  // ទម្រង់ថ្មី: ជួរតែមួយជាក្បាល (ឈ្មោះ ព្រឹក/យប់) គ្មាន ID — ផ្គូផ្គងតាមលំដាប់ក្នុងក្រុមនីមួយៗ
+  if (String(sched[0][0]).trim() !== 'Date') { restoreBySlots(sched); return; }
   var ids = sched[0].slice(1).map(function (x) { return String(x).trim(); });
   var labels = (sched[1] || []).slice(1).map(function (x) { return String(x).trim(); });
   var oldRows = {};
@@ -1196,10 +1277,6 @@ function renderSchedule() {
   }
   html += '<div style="overflow-x:auto;"><table class="sched"><thead><tr>' +
     '<th style="text-align:left;">កាលបរិច្ឆេទ</th>' + headerCells +
-    '<th style="width:60px;white-space:nowrap;">' +
-    '<span class="col-add" title="បន្ថែមជួរឈរ" onclick="addColumn()">+</span> ' +
-    '<span class="col-add" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ" onclick="toggleHeaderEditMode()">✎</span>' +
-    '</th>' +
     '</tr></thead><tbody>';
 
   for (var d = 1; d <= nDays; d++) {
@@ -1226,7 +1303,6 @@ function renderSchedule() {
       if (isGroupStart(ci)) cell = cell.replace('<td>', '<td class="grp-start">');
       html += cell;
     });
-    html += '<td></td>';
     html += '</tr>';
   }
   html += '</tbody></table></div>';
@@ -1482,19 +1558,40 @@ function firstEmptyNameField(date) {
 function neighborCell(date, field, dir) {
   var p = date.split('-');
   var y = Number(p[0]), m = Number(p[1]), d = Number(p[2]);
-  var nextDate = date, nextField = field;
+  var dim = daysInMonth(y, m);
+  var cols = getColumnsForMonth(currentScheduleMonthKey()).filter(function (c) { return c.type !== 'text'; });
+  var idx = cols.findIndex(function (c) { return c.id === field; });
+  if (idx < 0 || !cols.length) return null;
   if (dir === 'down' || dir === 'up') {
     d += (dir === 'down') ? 1 : -1;
-    if (d < 1 || d > daysInMonth(y, m)) return null;
-    nextDate = y + '-' + pad2(m) + '-' + pad2(d);
+  } else if (dir === 'right') {
+    idx++;
+    if (idx >= cols.length) { idx = 0; d++; }   // ចុងជួរ → ថ្ងៃបន្ទាប់ ជួរដំបូង
   } else {
-    var cols = getColumnsForMonth(currentScheduleMonthKey());
-    var idx = cols.findIndex(function (c) { return c.id === field; });
-    idx += (dir === 'right') ? 1 : -1;
-    if (idx < 0 || idx >= cols.length) return null;
-    nextField = cols[idx].id;
+    idx--;
+    if (idx < 0) { idx = cols.length - 1; d--; } // ដើមជួរ → ថ្ងៃមុន ជួរចុងក្រោយ
   }
-  return document.querySelector('.cell-slot[data-date="' + nextDate + '"][data-field="' + nextField + '"]');
+  if (d < 1 || d > dim) return null;
+  var nextDate = y + '-' + pad2(m) + '-' + pad2(d);
+  return document.querySelector('.cell-slot[data-date="' + nextDate + '"][data-field="' + cols[idx].id + '"]');
+}
+
+// ជ្រើសឈ្មោះល្អបំផុតពីអក្សរដែលវាយមិនពេញ (មិនគិត Dr. / ទំហំអក្សរ / ដកឃ្លា)
+function bestDoctorMatch(typed, list) {
+  function strip(x) { return normName(baseDoctorName(x)).replace(/^dr\.?\s*/, ''); }
+  var q = strip(typed).replace(/\s+/g, '');
+  if (!q) return null;
+  function key(x) { return strip(x).replace(/\s+/g, ''); }
+  var sorted = list.slice().sort(compareDoctorNames);
+  var i, hit = null;
+  for (i = 0; i < sorted.length && !hit; i++) if (key(sorted[i]) === q) hit = sorted[i];
+  for (i = 0; i < sorted.length && !hit; i++) if (key(sorted[i]).indexOf(q) === 0) hit = sorted[i];
+  for (i = 0; i < sorted.length && !hit; i++) {
+    var words = strip(sorted[i]).split(/\s+/);
+    if (words.some(function (w) { return w.indexOf(q) === 0; })) hit = sorted[i];
+  }
+  for (i = 0; i < sorted.length && !hit; i++) if (key(sorted[i]).indexOf(q) !== -1) hit = sorted[i];
+  return hit;
 }
 
 function openCellInDirection(date, field, dir) {
@@ -1511,7 +1608,7 @@ function openCellInDirection(date, field, dir) {
 //   ← → .......... រក្សាទុក + លោតឆ្វេង / ស្ដាំ (តែពេល cursor នៅដើម / ចុងអក្សរ — បើមិនដូច្នោះ ព្រួញរំកិល cursor ធម្មតា)
 //   Tab / Shift+Tab  ស្ដាំ / ឆ្វេង
 //   Esc .......... បោះបង់
-function wireEditorInput(input, cell, date, field, currentVal, onInputExtra) {
+function wireEditorInput(input, cell, date, field, currentVal, onInputExtra, resolver) {
   var finished = false;
   function finish(cancel, dir) {
     if (finished) return;
@@ -1520,13 +1617,25 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra) {
     cell.style.display = '';
     if (cancel) { renderSchedule(); return; }
     var newVal = input.value.trim();
+    if (dir && newVal && resolver) { var best = resolver(newVal); if (best) newVal = best; }
     var ok = true;
     if (newVal === currentVal) renderSchedule();
     else ok = saveCellValue(date, field, newVal);
     if (dir && ok !== false) {
-      if (dir === 'right' && !input.dataset.noAutoFill) {
+      if (dir === 'right' && !newVal) {
+        // ក្រឡាទទេ + Enter → រំលងទៅក្រុមបន្ទាប់ (ព្រឹក → យប់)
+        var all = getColumnsForMonth(currentScheduleMonthKey()).filter(function (c) { return c.type !== 'text'; });
+        var ci = all.findIndex(function (c) { return c.id === field; });
+        var lbl = all[ci] && all[ci].label, tf = null;
+        for (var k = ci + 1; k < all.length; k++) { if (all[k].label !== lbl) { tf = all[k].id; break; } }
+        if (tf) {
+          var t2 = document.querySelector('.cell-slot[data-date="' + date + '"][data-field="' + tf + '"]');
+          if (t2) { t2.scrollIntoView({ block: 'nearest', inline: 'nearest' }); openEditor(t2); return; }
+        }
+      }
+      if (dir === 'right' && newVal && !input.dataset.noAutoFill) {
         var nf = firstEmptyNameField(date);
-        if (nf) {
+        if (nf && nf !== field) {
           var target = document.querySelector('.cell-slot[data-date="' + date + '"][data-field="' + nf + '"]');
           if (target) { target.scrollIntoView({ block: 'nearest', inline: 'nearest' }); openEditor(target); return; }
         }
@@ -1627,7 +1736,15 @@ function openEditor(cell) {
     var fromList = !e.inputType || e.inputType === 'insertReplacementText';
     var exact = suggestions.indexOf(v) !== -1 &&
       !suggestions.some(function (x) { return x !== v && x.indexOf(v) === 0; });
+    // បំពេញអក្សរបន្តស្វ័យប្រវត្តិ (ghost) ពេលវាយនៅដើមឈ្មោះ
+    if (e.inputType && e.inputType.indexOf('insertText') === 0 && nameInput.selectionStart === v.length) {
+      var low = nameInput.value.toLowerCase();
+      var comp = suggestions.filter(function (x) { return x.toLowerCase().indexOf(low) === 0 && x.length > low.length; })[0];
+      if (comp) { nameInput.value = comp; nameInput.setSelectionRange(low.length, comp.length); }
+    }
     return fromList || exact;
+  }, function (typed) {
+    return bestDoctorMatch(typed, suggestions);
   });
 }
 
