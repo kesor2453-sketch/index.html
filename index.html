@@ -504,7 +504,7 @@ function renderDeviceNameLabel() {
 // editing for that one past month (toggle), independent of the edit log.
 function scheduleMonthLocked() {
   var key = currentScheduleMonthKey();
-  return isPastMonthKey(key) && !STATE.unlockedMonths[key];
+  return isPastMonthKey(key) && !STATE.unlockedMonths[key] && !monthOpenForAll(key);
 }
 function toggleScheduleLock() {
   if (!requireOwner()) return;
@@ -543,23 +543,32 @@ function seedDefaultDoctors() {
   ];
 }
 
-var editOpen = false; // ម្ចាស់បើកឲ្យគ្រប់គ្នាបំពេញបាន (រក្សាក្នុង scheduleApp/settings)
-function canEdit() { return isOwner || editOpen; }
-function requireEdit() {
-  if (canEdit()) return true;
-  showToast('👁 មើលបានតែប៉ុណ្ណោះ — ម្ចាស់មិនទាន់បើកឲ្យកែទេ');
+var editOpenMonths = {}; // ខែដែលម្ចាស់បើកឲ្យគ្រប់គ្នាបំពេញ { '2026-10': true } (រក្សាក្នុង scheduleApp/settings)
+function monthOpenForAll(ym) { return !!editOpenMonths[ym]; }
+function anyMonthOpen() { return Object.keys(editOpenMonths).some(function (k) { return editOpenMonths[k]; }); }
+function canEdit() { return isOwner || anyMonthOpen(); }
+function canEditMonth(ym) { return isOwner || monthOpenForAll(ym); }
+function requireEdit(ym) {
+  ym = ym || currentScheduleMonthKey();
+  if (canEditMonth(ym)) return true;
+  showToast('👁 មើលបានតែប៉ុណ្ណោះ — ម្ចាស់មិនទាន់បើកឲ្យកែខែនេះទេ');
   return false;
 }
 function renderEditOpenButton() {
   var b = document.getElementById('openEditBtn');
   if (!b) return;
   b.style.display = isOwner ? 'inline-block' : 'none';
-  b.textContent = editOpen ? '🟢 កំពុងបើកឲ្យគ្រប់គ្នាបំពេញ (ចុចដើម្បីបិទ)' : '🔴 បិទ — ចុចដើម្បីបើកឲ្យគ្រប់គ្នាបំពេញ';
-  b.style.background = editOpen ? '#e8f5e9' : '#fdeaea';
+  var ym = currentScheduleMonthKey(), on = monthOpenForAll(ym), lbl = ym.slice(5) + '/' + ym.slice(0, 4);
+  b.textContent = on ? ('🟢 ខែ ' + lbl + ' បើកឲ្យគ្រប់គ្នាបំពេញ (ចុចបិទ)') : ('🔴 ខែ ' + lbl + ' បិទ — ចុចដើម្បីបើកឲ្យគ្រប់គ្នាបំពេញ');
+  b.style.background = on ? '#e8f5e9' : '#fdeaea';
 }
 function toggleEditOpen() {
   if (!requireOwner()) return;
-  setDoc(settingsDocRef, { editOpen: !editOpen }).catch(function (err) { showToast('⚠ ' + err.message); });
+  var ym = currentScheduleMonthKey();
+  var next = {};
+  Object.keys(editOpenMonths).forEach(function (k) { if (editOpenMonths[k] && k !== ym) next[k] = true; });
+  if (!monthOpenForAll(ym)) next[ym] = true;
+  setDoc(settingsDocRef, { editOpenMonths: next }).catch(function (err) { showToast('⚠ ' + err.message); });
 }
 window.toggleEditOpen = toggleEditOpen;
 function requireOwner() {
@@ -883,7 +892,9 @@ document.addEventListener('DOMContentLoaded', function () {
   if (DOC_ID !== 'main') showToast('⚠ កំពុងមើល document: ' + DOC_ID + ' — កុំកែ ប្រើតែ ⬇ Backup ដើម្បីទាញទិន្នន័យ');
 
   onSnapshot(settingsDocRef, function (ss) {
-    editOpen = !!(ss.exists() && ss.data().editOpen);
+    var em = (ss.exists() && ss.data().editOpenMonths) || {};
+    editOpenMonths = em;
+    try { if (firstSnapshotHandled) renderSchedule(); } catch (e) {}
     renderEditOpenButton();
   }, function () { /* ignore */ });
 
@@ -1084,11 +1095,12 @@ var headerEditMode = false;
 var dragColId = null;
 
 function renderSchedule() {
+  try { renderEditOpenButton(); } catch (e) {}
   var y = STATE.year, m = STATE.month;
   var nDays = daysInMonth(y, m);
   var today = new Date();
   var todayStr = today.getFullYear() + '-' + pad2(today.getMonth() + 1) + '-' + pad2(today.getDate());
-  var cols = getColumnsForMonth(currentScheduleMonthKey());
+  var cols = getColumnsForMonth(currentScheduleMonthKey()).filter(function (c) { return c.type !== 'text'; }); // លាក់ជួរ ផ្សេងៗ (ទិន្នន័យចាស់មិនត្រូវលុបទេ)
   var locked = scheduleMonthLocked();
 
   document.getElementById('monthLabel').textContent = MONTH_NAMES_KM[m - 1] + ' ' + y;
@@ -1573,6 +1585,7 @@ function openEditor(cell) {
 }
 
 function saveCellValue(date, field, value) {
+  if (!canEditMonth(date.slice(0, 7))) { showToast('👁 ខែនេះមិនទាន់បើកឲ្យកែទេ'); renderSchedule(); return false; }
   var row = rowForDate(date);
   if (!row) { row = { Date: date }; STATE.scheduleAll.push(row); }
 
