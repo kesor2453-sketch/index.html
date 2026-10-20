@@ -232,8 +232,8 @@
         </div>
         <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
-          <button type="button" class="today-btn no-print" onclick="exportBackup()" title="ទាញទិន្នន័យទាំងអស់ជាឯកសារ JSON">⬇ Backup</button>
-          <label class="today-btn no-print" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ backup ចូលវិញ">⬆ Restore<input type="file" accept="application/json,.json" style="display:none" onchange="importBackup(this)"></label>
+          <button type="button" class="today-btn no-print" onclick="exportBackup()" title="ទាញទិន្នន័យទាំងអស់ជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
+          <label class="today-btn no-print" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ Sheet (.xlsx) ចូលវិញ">⬆ Restore<input type="file" accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importBackup(this)"></label>
         </div>
       </div>
       <div id="scheduleWrap"></div>
@@ -704,34 +704,152 @@ function saveLocalSafetyCopy() {
     localStorage.setItem('rosterSafetyCopies', JSON.stringify(list));
   } catch (e) { /* ignore */ }
 }
-function exportBackup() {
-  var blob = new Blob([JSON.stringify(currentBackupObject(), null, 1)], { type: 'application/json' });
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'roster-backup-' + new Date().toISOString().slice(0, 10) + '.json';
-  document.body.appendChild(a); a.click(); a.remove();
+function loadXlsxLib(cb) {
+  if (window.XLSX) { cb(); return; }
+  var sc = document.createElement('script');
+  sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  sc.onload = cb;
+  sc.onerror = function () { showToast('⚠ មិនអាចផ្ទុកឧបករណ៍ Excel បានទេ — ពិនិត្យអ៊ីនធឺណិត'); };
+  document.head.appendChild(sc);
 }
+
+function unionKeys(list, skip) {
+  var keys = [];
+  list.forEach(function (o) { Object.keys(o || {}).forEach(function (k) { if (skip.indexOf(k) === -1 && keys.indexOf(k) === -1) keys.push(k); }); });
+  return keys;
+}
+
+// ⬇ Backup → ឯកសារ .xlsx (បើកក្នុង Google Sheets បានភ្លាម: Drive → Upload → បើកជា Google Sheets)
+function exportBackup() {
+  loadXlsxLib(function () {
+    var b = currentBackupObject();
+    var ids = [], labelOf = {};
+    function addCols(list) { (list || []).forEach(function (c) { if (ids.indexOf(c.id) === -1) ids.push(c.id); labelOf[c.id] = c.label; }); }
+    Object.keys(b.columnsByMonth || {}).sort().forEach(function (ym) { addCols(b.columnsByMonth[ym]); });
+    addCols(b.columnsTemplate);
+    unionKeys(b.scheduleAll, ['Date', '_log']).forEach(function (k) { if (ids.indexOf(k) === -1) ids.push(k); });
+
+    var rows = b.scheduleAll.slice().sort(function (x, y) { return String(x.Date).localeCompare(String(y.Date)); });
+    var sched = [['Date'].concat(ids), ['កាលបរិច្ឆេទ'].concat(ids.map(function (id) { return labelOf[id] || ''; }))];
+    rows.forEach(function (r) { sched.push([r.Date].concat(ids.map(function (id) { return r[id] == null ? '' : String(r[id]); }))); });
+
+    var colRows = [['month', 'order', 'id', 'label', 'type']];
+    Object.keys(b.columnsByMonth || {}).sort().forEach(function (ym) {
+      b.columnsByMonth[ym].forEach(function (c, i) { colRows.push([ym, i + 1, c.id, c.label, c.type]); });
+    });
+    (b.columnsTemplate || []).forEach(function (c, i) { colRows.push(['_template', i + 1, c.id, c.label, c.type]); });
+
+    var dKeys = unionKeys(b.doctors, []);
+    var docRows = [dKeys].concat((b.doctors || []).map(function (d) { return dKeys.map(function (k) { return d[k] == null ? '' : String(d[k]); }); }));
+    var pKeys = unionKeys(b.doctorPhones, []);
+    var phRows = [pKeys].concat((b.doctorPhones || []).map(function (p) { return pKeys.map(function (k) { return p[k] == null ? '' : String(p[k]); }); }));
+    var meta = [['key', 'value'], ['unlockedMonths', JSON.stringify(b.unlockedMonths || {})], ['savedAt', b.savedAt]];
+
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sched), 'Schedule');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(colRows), 'Columns');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(docRows), 'Doctors');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(phRows), 'Phones');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(meta), 'Meta');
+    XLSX.writeFile(wb, 'roster-backup-' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    showToast('ទាញយកឯកសារ Sheet រួចរាល់ ✓ (បើកក្នុង Google Sheets បាន)');
+  });
+}
+
+function normDateCell(v) {
+  var t = String(v == null ? '' : v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  var d = new Date(t);
+  if (!isNaN(d.getTime())) return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  return '';
+}
+
+function restoreFromWorkbook(wb) {
+  function sheetRows(name) {
+    var ws = wb.Sheets[name];
+    return ws ? XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) : null;
+  }
+  var sched = sheetRows('Schedule'), cols = sheetRows('Columns');
+  if (!sched || !cols) throw new Error('ឯកសារមិនមែនជា backup របស់កាលវិភាគនេះទេ (ត្រូវមាន Schedule និង Columns)');
+  var ids = sched[0].slice(1).map(function (x) { return String(x).trim(); });
+  var oldRows = {};
+  STATE.scheduleAll.forEach(function (r) { oldRows[r.Date] = r; });
+  var newRows = [];
+  for (var i = 2; i < sched.length; i++) {
+    var date = normDateCell(sched[i][0]);
+    if (!date) continue;
+    var row = { Date: date };
+    ids.forEach(function (id, k) { if (id && sched[i][k + 1] !== '' && sched[i][k + 1] != null) row[id] = String(sched[i][k + 1]); });
+    if (oldRows[date] && oldRows[date]._log) row._log = oldRows[date]._log; // រក្សាកំណត់ត្រាកែប្រែដែលមានស្រាប់
+    newRows.push(row);
+  }
+  var byMonth = {}, tpl = [];
+  cols.slice(1).forEach(function (r) {
+    var c = { id: String(r[2]).trim(), label: String(r[3]), type: String(r[4]).trim() || 'name' };
+    if (!c.id) return;
+    if (String(r[0]) === '_template') tpl.push({ o: Number(r[1]) || 0, c: c });
+    else { (byMonth[r[0]] = byMonth[r[0]] || []).push({ o: Number(r[1]) || 0, c: c }); }
+  });
+  var cbm = {};
+  Object.keys(byMonth).forEach(function (ym) { cbm[ym] = byMonth[ym].sort(function (a, b) { return a.o - b.o; }).map(function (x) { return x.c; }); });
+  var template = tpl.sort(function (a, b) { return a.o - b.o; }).map(function (x) { return x.c; });
+  function tableToObjects(name) {
+    var t = sheetRows(name);
+    if (!t || t.length < 2) return [];
+    var keys = t[0].map(function (k) { return String(k).trim(); });
+    return t.slice(1).filter(function (r) { return r.some(function (v) { return v !== ''; }); }).map(function (r) {
+      var o = {}; keys.forEach(function (k, i) { if (k) o[k] = r[i]; });
+      return o;
+    });
+  }
+  var doctors = tableToObjects('Doctors').map(function (d) { if ('Active' in d) d.Active = !(String(d.Active).toLowerCase() === 'false'); return d; });
+  var phones = tableToObjects('Phones');
+  var unlocked = {};
+  var meta = sheetRows('Meta');
+  if (meta) meta.forEach(function (r) { if (r[0] === 'unlockedMonths') { try { unlocked = JSON.parse(r[1] || '{}'); } catch (e) {} } });
+
+  if (!window.confirm('ដាក់ទិន្នន័យពី Sheet ចូលជំនួសទិន្នន័យបច្ចុប្បន្នទាំងអស់? (' + newRows.length + ' ថ្ងៃ, ' + doctors.length + ' គ្រូពេទ្យ)')) return;
+  STATE.doctors = doctors; STATE.scheduleAll = newRows;
+  STATE.columnsByMonth = cbm;
+  STATE.columnsTemplate = template.length ? template : JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+  STATE.doctorPhones = phones; STATE.unlockedMonths = unlocked;
+  dataLoaded = true;
+  persistRemoteState(); renderSchedule(); renderDoctors(); renderPhoneDirectory();
+  showToast('ដាក់ទិន្នន័យចូលវិញរួចរាល់ ✓');
+}
+
+// ⬆ Restore ← ឯកសារ .xlsx ដែលបាន Backup (ឬទាញពី Google Sheets: File → Download → .xlsx) ឬ .json ចាស់
 function importBackup(input) {
-  if (!requireOwner()) return;
+  if (!requireOwner()) { input.value = ''; return; }
   var f = input.files && input.files[0];
   if (!f) return;
+  var isJson = /\.json$/i.test(f.name);
   var rd = new FileReader();
   rd.onload = function () {
     try {
-      var d = JSON.parse(rd.result);
-      if (!d || !Array.isArray(d.scheduleAll)) throw new Error('ឯកសារមិនត្រឹមត្រូវ');
-      if (!window.confirm('ដាក់ទិន្នន័យពី backup ចូលជំនួសទិន្នន័យបច្ចុប្បន្នទាំងអស់? (' + d.scheduleAll.length + ' ថ្ងៃ)')) return;
-      STATE.doctors = d.doctors || []; STATE.scheduleAll = d.scheduleAll;
-      STATE.columnsByMonth = d.columnsByMonth || {};
-      STATE.columnsTemplate = d.columnsTemplate && d.columnsTemplate.length ? d.columnsTemplate : JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
-      STATE.doctorPhones = d.doctorPhones || []; STATE.unlockedMonths = d.unlockedMonths || {};
-      dataLoaded = true;
-      persistRemoteState(); renderSchedule(); renderDoctors();
-      showToast('ដាក់ទិន្នន័យចូលវិញរួចរាល់ ✓');
-    } catch (e) { showToast('⚠ ' + e.message); }
-    input.value = '';
+      if (isJson) {
+        var d = JSON.parse(rd.result);
+        if (!d || !Array.isArray(d.scheduleAll)) throw new Error('ឯកសារមិនត្រឹមត្រូវ');
+        if (!window.confirm('ដាក់ទិន្នន័យពី backup ចូលជំនួសទិន្នន័យបច្ចុប្បន្នទាំងអស់? (' + d.scheduleAll.length + ' ថ្ងៃ)')) { input.value = ''; return; }
+        STATE.doctors = d.doctors || []; STATE.scheduleAll = d.scheduleAll;
+        STATE.columnsByMonth = d.columnsByMonth || {};
+        STATE.columnsTemplate = d.columnsTemplate && d.columnsTemplate.length ? d.columnsTemplate : JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+        STATE.doctorPhones = d.doctorPhones || []; STATE.unlockedMonths = d.unlockedMonths || {};
+        dataLoaded = true;
+        persistRemoteState(); renderSchedule(); renderDoctors();
+        showToast('ដាក់ទិន្នន័យចូលវិញរួចរាល់ ✓');
+        input.value = '';
+      } else {
+        var buf = rd.result;
+        loadXlsxLib(function () {
+          try { restoreFromWorkbook(XLSX.read(buf, { type: 'array' })); }
+          catch (e2) { showToast('⚠ ' + e2.message); }
+          input.value = '';
+        });
+      }
+    } catch (e) { showToast('⚠ ' + e.message); input.value = ''; }
   };
-  rd.readAsText(f);
+  if (isJson) rd.readAsText(f); else rd.readAsArrayBuffer(f);
 }
 window.exportBackup = exportBackup; window.importBackup = importBackup;
 window.showSafetyCopies = function () {
