@@ -49,6 +49,7 @@
     font-size:13.5px; user-select:none; white-space:nowrap;
   }
   .tab.active{background:var(--brand);color:var(--brand-ink);}
+  .tab.admin-tab.on{background:#e8f5e9;color:#2e7d32;}
 
   .panel{display:none;}
   .panel.active{display:block;}
@@ -206,13 +207,14 @@
   <header class="top">
     <div>
       <h1>កាលវិភាគគ្រូពេទ្យ (SOPHEAK VISAL CLINIC)</h1>
-      <div class="muted">ឧបករណ៍/អ្នកកែ៖ <span id="deviceNameLabel">—</span> <button type="button" id="ownerBtn" onclick="ownerButtonClick()" style="border:1px solid #d6dbe6;background:#fff3e0;border-radius:999px;padding:3px 10px;font-family:inherit;font-size:12px;cursor:pointer;">🔒 មើលតែប៉ុណ្ណោះ · ចូលជាម្ចាស់</button> <button type="button" id="openEditBtn" onclick="toggleEditOpen()" style="display:none;border:1px solid #d6dbe6;border-radius:999px;padding:3px 10px;font-family:inherit;font-size:12px;cursor:pointer;">🔴 បិទ</button></div>
+      <div class="muted">ឧបករណ៍/អ្នកកែ៖ <span id="deviceNameLabel">—</span> <button type="button" id="openEditBtn" onclick="toggleEditOpen()" style="display:none;border:1px solid #d6dbe6;border-radius:999px;padding:3px 10px;font-family:inherit;font-size:12px;cursor:pointer;">🔴 បិទ</button></div>
     </div>
     <div class="tabs">
       <div class="tab active" data-panel="panel-schedule">កាលវិភាគ</div>
       <div class="tab" data-panel="panel-doctors">គ្រូពេទ្យ</div>
       <div class="tab" data-panel="panel-payroll">ចំនួនថ្ងៃយាម</div>
       <div class="tab" data-panel="panel-log">កំណត់ត្រាកែប្រែ</div>
+      <div class="tab admin-tab" id="ownerBtn" onclick="ownerButtonClick()" role="button">🔒 Admin</div>
     </div>
   </header>
 
@@ -305,7 +307,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   initializeFirestore, persistentLocalCache, doc, setDoc, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -568,11 +570,91 @@ function requireOwner() {
 function renderOwnerButton() {
   var btn = document.getElementById('ownerBtn');
   if (!btn) return;
-  btn.textContent = isOwner ? ('🔓 ម្ចាស់៖ ' + ownerEmail + ' (ចាកចេញ)') : '🔒 មើលតែប៉ុណ្ណោះ · ចូលជាម្ចាស់';
-  btn.style.background = isOwner ? '#e8f5e9' : '#fff3e0';
+  btn.textContent = isOwner ? '🔓 Admin' : '🔒 Admin';
+  btn.title = isOwner ? ('ចូលជាម្ចាស់៖ ' + ownerEmail + ' — ចុចដើម្បីចាកចេញ') : 'មើលតែប៉ុណ្ណោះ — ចុចដើម្បីចូលជាម្ចាស់';
+  btn.classList.toggle('on', !!isOwner);
 }
 function ownerButtonClick() {
   if (isOwner) { signOut(auth); return; }
+  openLoginModal();
+}
+
+function authErrorKm(err) {
+  var c = (err && err.code) || '';
+  if (c === 'auth/invalid-credential' || c === 'auth/wrong-password' || c === 'auth/user-not-found' || c === 'auth/invalid-login-credentials') return 'Gmail ឬលេខកូដមិនត្រឹមត្រូវ';
+  if (c === 'auth/invalid-email') return 'ទម្រង់ Gmail មិនត្រឹមត្រូវ';
+  if (c === 'auth/too-many-requests') return 'ព្យាយាមច្រើនពេក — សូមរង់ចាំបន្តិចហើយសាកម្តងទៀត';
+  if (c === 'auth/operation-not-allowed') return 'មិនទាន់បើក Email/Password ក្នុង Firebase Authentication';
+  if (c === 'auth/network-request-failed') return 'គ្មានអ៊ីនធឺណិត';
+  return (err && err.message) || 'ចូលមិនបាន';
+}
+
+function afterOwnerCheck(email) {
+  var em = String(email || '').toLowerCase();
+  if (OWNER_EMAILS.map(function (x) { return x.toLowerCase(); }).indexOf(em) === -1) {
+    showToast('⚠ ' + em + ' មិនមែនជាម្ចាស់ទេ — មើលបានតែប៉ុណ្ណោះ');
+    signOut(auth);
+    return false;
+  }
+  return true;
+}
+
+function openLoginModal() {
+  var old = document.getElementById('loginModal');
+  if (old) old.remove();
+  var savedEmail = '';
+  try { savedEmail = localStorage.getItem('ownerEmail') || ''; } catch (e) {}
+  var ov = document.createElement('div');
+  ov.id = 'loginModal';
+  ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(20,25,40,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<form id="loginForm" style="background:#fff;border-radius:16px;padding:22px;width:min(380px,100%);box-shadow:0 12px 40px rgba(0,0,0,.28);font-family:inherit;">' +
+      '<div style="font-weight:700;font-size:16px;margin-bottom:4px;">🔒 ចូលជាម្ចាស់</div>' +
+      '<div style="color:#6b7686;font-size:12.5px;margin-bottom:14px;">ចូលដើម្បីកែកាលវិភាគ។ ចូលម្តងហើយ ឧបករណ៍នេះនឹងចងចាំ។</div>' +
+      '<label style="font-size:12.5px;font-weight:600;">Gmail</label>' +
+      '<input id="loginEmail" type="email" autocomplete="username" required placeholder="name@gmail.com" value="' + escapeAttr(savedEmail) + '" style="width:100%;box-sizing:border-box;margin:4px 0 12px;padding:10px;border:1px solid #c3cad6;border-radius:10px;font-family:inherit;font-size:14px;">' +
+      '<label style="font-size:12.5px;font-weight:600;">លេខកូដ</label>' +
+      '<div style="position:relative;margin:4px 0 8px;">' +
+        '<input id="loginPass" type="password" autocomplete="current-password" required placeholder="លេខកូដ" style="width:100%;box-sizing:border-box;padding:10px 42px 10px 10px;border:1px solid #c3cad6;border-radius:10px;font-family:inherit;font-size:14px;">' +
+        '<span id="loginEye" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;user-select:none;">👁</span>' +
+      '</div>' +
+      '<div id="loginErr" style="color:#c0392b;font-size:12.5px;min-height:18px;margin-bottom:6px;"></div>' +
+      '<button type="submit" id="loginGo" style="width:100%;border:none;background:#2f6fed;color:#fff;border-radius:10px;padding:11px;font-family:inherit;font-weight:700;font-size:14px;cursor:pointer;">ចូល</button>' +
+      '<button type="button" id="loginGoogle" style="width:100%;margin-top:8px;border:1px solid #c3cad6;background:#fff;border-radius:10px;padding:10px;font-family:inherit;font-weight:600;font-size:13px;cursor:pointer;">ចូលជាមួយ Google</button>' +
+      '<button type="button" id="loginCancel" style="width:100%;margin-top:8px;border:none;background:#eef1f6;border-radius:10px;padding:9px;font-family:inherit;cursor:pointer;">បោះបង់</button>' +
+    '</form>';
+  document.body.appendChild(ov);
+  var q = function (id) { return ov.querySelector('#' + id); };
+  function close() { ov.remove(); }
+  q('loginEye').onclick = function () { var p = q('loginPass'); p.type = p.type === 'password' ? 'text' : 'password'; };
+  q('loginCancel').onclick = close;
+  ov.addEventListener('mousedown', function (e) { if (e.target === ov) close(); });
+  q('loginGoogle').onclick = function () {
+    signInWithPopup(auth, new GoogleAuthProvider()).then(function (res) {
+      if (afterOwnerCheck(res.user && res.user.email)) close();
+      else q('loginErr').textContent = 'Gmail នេះមិនមែនជាម្ចាស់ទេ';
+    }).catch(function (err) { q('loginErr').textContent = authErrorKm(err); });
+  };
+  q('loginForm').onsubmit = function (e) {
+    e.preventDefault();
+    var em = q('loginEmail').value.trim(), pw = q('loginPass').value;
+    q('loginErr').textContent = '';
+    q('loginGo').disabled = true; q('loginGo').textContent = 'កំពុងចូល...';
+    signInWithEmailAndPassword(auth, em, pw).then(function (res) {
+      try { localStorage.setItem('ownerEmail', em); } catch (e2) {}
+      if (afterOwnerCheck(res.user && res.user.email)) close();
+      else { q('loginErr').textContent = 'Gmail នេះមិនមែនជាម្ចាស់ទេ'; q('loginGo').disabled = false; q('loginGo').textContent = 'ចូល'; }
+    }).catch(function (err) {
+      q('loginErr').textContent = authErrorKm(err);
+      q('loginGo').disabled = false; q('loginGo').textContent = 'ចូល';
+    });
+  };
+  setTimeout(function () { (savedEmail ? q('loginPass') : q('loginEmail')).focus(); }, 50);
+}
+window.openLoginModal = openLoginModal;
+
+function ownerButtonClickGoogleLegacy() {
   signInWithPopup(auth, new GoogleAuthProvider()).then(function (res) {
     var em = String((res.user && res.user.email) || '').toLowerCase();
     if (OWNER_EMAILS.map(function (x) { return x.toLowerCase(); }).indexOf(em) === -1) {
@@ -780,7 +862,7 @@ function doBackup() {
 }
 
 function bindTabs() {
-  var tabs = document.querySelectorAll('.tab');
+  var tabs = document.querySelectorAll('.tab[data-panel]');
   tabs.forEach(function (t) {
     t.addEventListener('click', function () {
       tabs.forEach(function (x) { x.classList.remove('active'); });
