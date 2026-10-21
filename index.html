@@ -247,7 +247,7 @@
         </div>
         <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
-          <span id="colTools" class="no-print" style="display:none;"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
+          <span id="colTools" class="no-print"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
           <button type="button" class="today-btn no-print" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
           <label class="today-btn no-print" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ Sheet (.xlsx) ចូលវិញ">⬆ Restore<input type="file" accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importBackup(this)"></label>
         </div>
@@ -313,6 +313,7 @@
           <span style="color:var(--sub);font-size:12px;">(ដូចខែក្នុងកាលវិភាគ)</span>
         </div>
       </div>
+      <div id="reqWrap" class="no-print"></div>
       <div id="logWrap"></div>
     </div>
   </div>
@@ -325,7 +326,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  initializeFirestore, persistentLocalCache, doc, setDoc, onSnapshot
+  initializeFirestore, persistentLocalCache, doc, setDoc, onSnapshot, collection, addDoc, deleteDoc, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ============================================================
@@ -560,8 +561,14 @@ function seedDefaultDoctors() {
 }
 
 var editOpenMonths = {}; // ខែដែលម្ចាស់បើកឲ្យគ្រប់គ្នាបំពេញ { '2026-10': true } (រក្សាក្នុង scheduleApp/settings)
-function monthOpenForAll(ym) { return !!editOpenMonths[ym]; }
-function anyMonthOpen() { return Object.keys(editOpenMonths).some(function (k) { return editOpenMonths[k]; }); }
+var openFrom = null, openTo = null; // បើកអូតូពីខែ openFrom រហូតដល់មុនខែ openTo (បើគ្មាន openTo = បើកជានិច្ច)
+function monthOpenForAll(ym) {
+  if (editOpenMonths[ym]) return true;
+  return !!(openFrom && ym >= openFrom && (!openTo || ym < openTo));
+}
+function anyMonthOpen() {
+  return Object.keys(editOpenMonths).some(function (k) { return editOpenMonths[k]; }) || !!(openFrom && (!openTo || openTo > openFrom));
+}
 function canEdit() { return isOwner || anyMonthOpen(); }
 function canEditMonth(ym) { return isOwner || monthOpenForAll(ym); }
 function requireEdit(ym) {
@@ -570,12 +577,13 @@ function requireEdit(ym) {
   showToast('👁 មើលបានតែប៉ុណ្ណោះ — ម្ចាស់មិនទាន់បើកឲ្យកែខែនេះទេ');
   return false;
 }
+function updateColTools() { }
 function renderEditOpenButton() {
   var b = document.getElementById('openEditBtn');
   if (!b) return;
   b.style.display = isOwner ? 'inline-block' : 'none';
   var ym = currentScheduleMonthKey(), on = monthOpenForAll(ym), lbl = ym.slice(5) + '/' + ym.slice(0, 4);
-  b.textContent = on ? ('🟢 ខែ ' + lbl + ' បើកឲ្យគ្រប់គ្នាបំពេញ (ចុចបិទ)') : ('🔴 ខែ ' + lbl + ' បិទ — ចុចដើម្បីបើកឲ្យគ្រប់គ្នាបំពេញ');
+  b.textContent = on ? ('🟢 ខែ ' + lbl + ' បើកឲ្យគ្រប់គ្នាបំពេញ (ចុចបិទ · ខែបន្ទាប់ៗបើកអូតូ)') : ('🔴 ខែ ' + lbl + ' បិទ — ចុចដើម្បីបើកឲ្យគ្រប់គ្នាបំពេញ');
   b.style.background = on ? '#e8f5e9' : '#fdeaea';
 }
 function toggleEditOpen() {
@@ -583,8 +591,13 @@ function toggleEditOpen() {
   var ym = currentScheduleMonthKey();
   var next = {};
   Object.keys(editOpenMonths).forEach(function (k) { if (editOpenMonths[k] && k !== ym) next[k] = true; });
-  if (!monthOpenForAll(ym)) next[ym] = true;
-  setDoc(settingsDocRef, { editOpenMonths: next }).catch(function (err) { showToast('⚠ ' + err.message); });
+  var nFrom = openFrom, nTo = openTo;
+  if (!monthOpenForAll(ym)) {
+    next[ym] = true; nFrom = ym; nTo = null;      // បើកខែនេះ + ខែបន្តបន្ទាប់ទាំងអស់អូតូ
+  } else if (nFrom && ym >= nFrom && (!nTo || ym < nTo)) {
+    if (ym === nFrom) { nFrom = null; nTo = null; } else { nTo = ym; } // បិទពីខែនេះទៅមុខ
+  }
+  setDoc(settingsDocRef, { editOpenMonths: next, openFrom: nFrom || null, openTo: nTo || null }).catch(function (err) { showToast('⚠ ' + err.message); });
 }
 window.toggleEditOpen = toggleEditOpen;
 function requireOwner() {
@@ -595,10 +608,10 @@ function requireOwner() {
 function renderOwnerButton() {
   var btn = document.getElementById('ownerBtn');
   if (!btn) return;
-  btn.textContent = isOwner ? '🔓 Admin' : '🔒 Admin';
+  btn.textContent = (isOwner ? '🔓 Admin' : '🔒 Admin') + (isOwner && REQUESTS.length ? ' 📨' + REQUESTS.length : '');
   btn.title = isOwner ? ('ចូលជាម្ចាស់៖ ' + ownerEmail + ' — ចុចដើម្បីចាកចេញ') : 'មើលតែប៉ុណ្ណោះ — ចុចដើម្បីចូលជាម្ចាស់';
   btn.classList.toggle('on', !!isOwner);
-  var ct = document.getElementById('colTools'); if (ct) ct.style.display = isOwner ? 'inline' : 'none';
+  syncRequestsListener();
 }
 function ownerButtonClick() {
   if (isOwner) { signOut(auth); return; }
@@ -638,8 +651,8 @@ function openLoginModal() {
     '<form id="loginForm" style="background:#fff;border-radius:16px;padding:22px;width:min(380px,100%);box-shadow:0 12px 40px rgba(0,0,0,.28);font-family:inherit;">' +
       '<div style="font-weight:700;font-size:16px;margin-bottom:4px;">🔒 ចូលជាម្ចាស់</div>' +
       '<div style="color:#6b7686;font-size:12.5px;margin-bottom:14px;">ចូលដើម្បីកែកាលវិភាគ។ ចូលម្តងហើយ ឧបករណ៍នេះនឹងចងចាំ។</div>' +
-      '<label style="font-size:12.5px;font-weight:600;">Gmail</label>' +
-      '<input id="loginEmail" type="email" autocomplete="username" required placeholder="name@gmail.com" value="' + escapeAttr(savedEmail) + '" style="width:100%;box-sizing:border-box;margin:4px 0 12px;padding:10px;border:1px solid #c3cad6;border-radius:10px;font-family:inherit;font-size:14px;">' +
+      '<div style="font-size:12.5px;color:#6b7686;margin-bottom:10px;">Gmail៖ <b>' + escapeHtml(OWNER_EMAILS[0]) + '</b></div>' +
+      '<input id="loginEmail" type="hidden" autocomplete="username" value="' + escapeAttr(OWNER_EMAILS[0]) + '">' +
       '<label style="font-size:12.5px;font-weight:600;">លេខកូដ</label>' +
       '<div style="position:relative;margin:4px 0 8px;">' +
         '<input id="loginPass" type="password" autocomplete="current-password" required placeholder="លេខកូដ" style="width:100%;box-sizing:border-box;padding:10px 42px 10px 10px;border:1px solid #c3cad6;border-radius:10px;font-family:inherit;font-size:14px;">' +
@@ -676,7 +689,7 @@ function openLoginModal() {
       q('loginGo').disabled = false; q('loginGo').textContent = 'ចូល';
     });
   };
-  setTimeout(function () { (savedEmail ? q('loginPass') : q('loginEmail')).focus(); }, 50);
+  setTimeout(function () { q('loginPass').focus(); }, 50);
 }
 window.openLoginModal = openLoginModal;
 
@@ -1022,6 +1035,8 @@ document.addEventListener('DOMContentLoaded', function () {
   onSnapshot(settingsDocRef, function (ss) {
     var em = (ss.exists() && ss.data().editOpenMonths) || {};
     editOpenMonths = em;
+    openFrom = (ss.exists() && ss.data().openFrom) || null;
+    openTo = (ss.exists() && ss.data().openTo) || null;
     try { if (firstSnapshotHandled) renderSchedule(); } catch (e) {}
     renderEditOpenButton();
   }, function () { /* ignore */ });
@@ -1312,7 +1327,7 @@ function renderSchedule() {
 }
 
 function moveColumn(id, delta) {
-  if (!requireOwner()) return;
+  if (!requireEdit()) return;
   var cols = getColumnsForMonth(currentScheduleMonthKey());
   var idx = cols.findIndex(function (c) { return c.id === id; });
   var newIdx = idx + delta;
@@ -1326,7 +1341,7 @@ function moveColumn(id, delta) {
 window.moveColumn = moveColumn;
 
 function onColDragStart(e, id) {
-  if (!requireOwner()) return;
+  if (!requireEdit()) return;
   dragColId = id;
   e.dataTransfer.effectAllowed = 'move';
 }
@@ -1338,7 +1353,7 @@ function onColDragOver(e) {
 window.onColDragOver = onColDragOver;
 
 function onColDrop(e, targetId) {
-  if (!requireOwner()) return;
+  if (!requireEdit()) return;
   e.preventDefault();
   if (!dragColId || dragColId === targetId) { dragColId = null; return; }
   var cols = getColumnsForMonth(currentScheduleMonthKey());
@@ -1356,14 +1371,14 @@ function onColDrop(e, targetId) {
 window.onColDrop = onColDrop;
 
 function toggleHeaderEditMode() {
-  if (!requireOwner()) return;
+  if (!requireEdit()) return;
   headerEditMode = !headerEditMode;
   renderSchedule();
 }
 window.toggleHeaderEditMode = toggleHeaderEditMode;
 
 function renameColumn(inputEl) {
-  if (!requireOwner()) return;
+  if (!requireEdit()) return;
   var id = inputEl.dataset.colid;
   var newLabel = inputEl.value.trim();
   var col = columnById(id);
@@ -1376,7 +1391,7 @@ function renameColumn(inputEl) {
 window.renameColumn = renameColumn;
 
 function addColumn() {
-  if (!requireOwner()) return;
+  if (!requireEdit()) return;
   var ym = currentScheduleMonthKey();
   var cols = getColumnsForMonth(ym);
   var nameCols = cols.filter(function (c) { return c.type === 'name'; });
@@ -1404,7 +1419,7 @@ function addColumn() {
 window.addColumn = addColumn;
 
 function deleteColumn(id) {
-  if (!requireOwner()) return;
+  if (!requireEdit()) return;
   var ym = currentScheduleMonthKey();
   var cols = getColumnsForMonth(ym);
   if (cols.length <= 1) { showToast('ត្រូវមានយ៉ាងហោចណាស់ ១ជួរឈរ'); return; }
@@ -1487,9 +1502,202 @@ function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
 
 function bindCellClicks() {
   document.querySelectorAll('.cell-slot').forEach(function (cell) {
-    cell.addEventListener('click', function () { openEditor(cell); });
+    cell.addEventListener('click', function () { openCellMenu(cell); });
   });
 }
+
+
+// ===== ម៉ឺនុយពេលចុចលើក្រឡា =====
+// កែបាន៖ ក្រឡាទទេ → វាយឈ្មោះ; ក្រឡាមានឈ្មោះ → 🗑 លុប / 🔄 ដូរវេន
+// កែមិនបាន៖ ស្នើទៅ Admin (លុប / ដូរវេន / បញ្ចូល / ផ្សេងៗ)
+function closeCellMenu() { var m = document.getElementById('cellMenu'); if (m) m.remove(); }
+function cellMenuShell(title, inner) {
+  closeCellMenu();
+  var ov = document.createElement('div');
+  ov.id = 'cellMenu';
+  ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(20,25,40,.45);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML = '<div style="background:#fff;border-radius:16px;padding:18px;width:min(340px,100%);box-shadow:0 12px 40px rgba(0,0,0,.28);font-family:inherit;">' +
+    '<div style="font-weight:700;font-size:15px;margin-bottom:12px;">' + title + '</div>' + inner + '</div>';
+  ov.addEventListener('mousedown', function (e) { if (e.target === ov) closeCellMenu(); });
+  document.body.appendChild(ov);
+  return ov;
+}
+var CM_BTN = 'display:block;width:100%;box-sizing:border-box;text-align:left;border:1px solid #d6dbe6;background:#f7f9fd;border-radius:10px;padding:11px 12px;margin-bottom:8px;font-family:inherit;font-size:14px;cursor:pointer;';
+var CM_INP = 'width:100%;box-sizing:border-box;padding:10px;border:1px solid #c3cad6;border-radius:10px;font-family:inherit;font-size:14px;margin-bottom:10px;';
+var CM_GO = CM_BTN + 'text-align:center;background:#2f6fed;color:#fff;border:none;font-weight:700;';
+function cmTitle(date, val) { var d = date.split('-'); return d[2] + '/' + d[1] + '/' + d[0] + (val ? ' — ' + escapeHtml(val) : ''); }
+
+function openCellMenu(cell) {
+  if (STATE.editing) return;
+  var date = cell.dataset.date, field = cell.dataset.field, val = cell.dataset.value || '';
+  var editable = canEditMonth(date.slice(0, 7));
+  if (editable && (!val || scheduleMonthLocked())) { openEditor(cell); return; }
+  var col = columnById(field);
+  var html = '';
+  if (editable) {
+    html += '<button type="button" data-a="del" style="' + CM_BTN + '">🗑 លុបឈ្មោះ</button>' +
+            '<button type="button" data-a="swap" style="' + CM_BTN + '">🔄 ដូរវេន</button>';
+  } else {
+    html += '<div style="font-size:12.5px;color:#6b7686;margin-bottom:10px;">ខែនេះមិនទាន់បើកឲ្យកែទេ — ផ្ញើសំណើទៅ Admin៖</div>';
+    if (val) html += '<button type="button" data-a="rdel" style="' + CM_BTN + '">🗑 ស្នើលុបឈ្មោះ</button>' +
+                     '<button type="button" data-a="rswap" style="' + CM_BTN + '">🔄 ស្នើដូរវេន</button>';
+    else html += '<button type="button" data-a="radd" style="' + CM_BTN + '">➕ ស្នើបញ្ចូលឈ្មោះ</button>';
+    html += '<button type="button" data-a="rnote" style="' + CM_BTN + '">📝 ផ្សេងៗ</button>';
+  }
+  html += '<button type="button" data-a="x" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>';
+  var ov = cellMenuShell(cmTitle(date, val), html);
+  ov.querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var a = b.dataset.a;
+      closeCellMenu();
+      if (a === 'del') saveCellValue(date, field, '');
+      else if (a === 'swap') openSwapDialog(date, field, val, false);
+      else if (a === 'rdel') openRequestDialog('delete', date, field, val, col);
+      else if (a === 'rswap') openSwapDialog(date, field, val, true);
+      else if (a === 'radd') openRequestDialog('add', date, field, val, col);
+      else if (a === 'rnote') openRequestDialog('note', date, field, val, col);
+    });
+  });
+}
+
+// ---- ផ្ញើសំណើទៅ Admin ----
+function sendRequest(obj) {
+  obj.by = obj.by || getDeviceName();
+  obj.at = new Date().toISOString();
+  obj.month = obj.date.slice(0, 7);
+  return addDoc(collection(db, 'scheduleRequests'), obj).then(function () {
+    showToast('បានផ្ញើសំណើទៅ Admin ✓');
+  }).catch(function (err) { showToast('⚠ ផ្ញើមិនបាន៖ ' + err.message); });
+}
+function openRequestDialog(type, date, field, val, col) {
+  var titles = { 'delete': '🗑 ស្នើលុបឈ្មោះ', add: '➕ ស្នើបញ្ចូលឈ្មោះ', note: '📝 ផ្សេងៗ' };
+  var ph = type === 'add' ? 'ឈ្មោះគ្រូពេទ្យ...' : (type === 'note' ? 'សរសេរសំណើ/កំណត់ត្រា...' : 'មូលហេតុ (មិនបាច់ក៏បាន)');
+  var ov = cellMenuShell(titles[type] + '<div style="font-weight:500;font-size:12.5px;color:#6b7686;">' + cmTitle(date, val) + '</div>',
+    '<input id="rqText" type="text" placeholder="' + ph + '" style="' + CM_INP + '">' +
+    '<input id="rqBy" type="text" placeholder="ឈ្មោះអ្នកស្នើ" value="' + escapeAttr(getDeviceName()) + '" style="' + CM_INP + '">' +
+    '<button type="button" id="rqGo" style="' + CM_GO + '">ផ្ញើទៅ Admin</button>');
+  var t = document.getElementById('rqText'); t.focus();
+  document.getElementById('rqGo').addEventListener('click', function () {
+    var by = document.getElementById('rqBy').value.trim();
+    var text = t.value.trim();
+    if ((type === 'add' || type === 'note') && !text) { showToast('សូមសរសេរមុន'); return; }
+    closeCellMenu();
+    sendRequest({ type: type, date: date, field: field, fieldLabel: col ? col.label : '', value: val, text: text, by: by || getDeviceName() });
+  });
+  t.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('rqGo').click(); } if (e.key === 'Escape') closeCellMenu(); });
+}
+
+// ---- ដូរវេន (ធ្វើភ្លាម ឬជាសំណើ) ----
+function performSwap(dateA, fieldA, dateB, fieldB) {
+  var ym = dateA.slice(0, 7);
+  var cols = getColumnsForMonth(ym).filter(function (c) { return c.type === 'name'; });
+  var valA = (rowForDate(dateA) || {})[fieldA], valB = (rowForDate(dateB) || {})[fieldB];
+  var colA = columnById(fieldA), colB = columnById(fieldB);
+  if (!valA || !valB || !colA || !colB) { showToast('⚠ ក្រឡាមិនមានឈ្មោះទៀតទេ — ដូរមិនបាន'); return false; }
+  if (saveCellValue(dateA, fieldA, '') === false) return false;
+  if (saveCellValue(dateB, fieldB, '') === false) return false;
+  function place(dt, col, v) {
+    var r = rowForDate(dt) || {};
+    var target = cols.filter(function (c) { return c.label === col.label && !r[c.id]; })[0];
+    return saveCellValue(dt, (target || col).id, v);
+  }
+  if (place(dateA, colA, valB) === false || place(dateB, colB, valA) === false) { showToast('⚠ ដូរមិនបានពេញលេញ — សូមពិនិត្យ'); return false; }
+  showToast('ដូរវេនរួចរាល់ ✓');
+  return true;
+}
+function openSwapDialog(dateA, fieldA, valA, asRequest) {
+  var ym = dateA.slice(0, 7), y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  var cols = getColumnsForMonth(ym).filter(function (c) { return c.type === 'name'; });
+  var dateOpts = '';
+  for (var d = 1; d <= daysInMonth(y, m); d++) { var ds = ym + '-' + pad2(d); dateOpts += '<option value="' + ds + '"' + (ds === dateA ? ' selected' : '') + '>' + d + '/' + pad2(m) + '</option>'; }
+  var ov = cellMenuShell((asRequest ? '🔄 ស្នើដូរវេន៖ ' : '🔄 ដូរវេន៖ ') + escapeHtml(valA),
+    '<div style="font-size:12.5px;color:#6b7686;margin-bottom:6px;">ដូរជាមួយ៖</div>' +
+    '<select id="swDate" style="' + CM_INP + '">' + dateOpts + '</select>' +
+    '<select id="swWho" style="' + CM_INP + '"></select>' +
+    (asRequest ? '<input id="rqBy" type="text" placeholder="ឈ្មោះអ្នកស្នើ" value="' + escapeAttr(getDeviceName()) + '" style="' + CM_INP + '">' : '') +
+    '<button type="button" id="swGo" style="' + CM_GO + '">' + (asRequest ? 'ផ្ញើទៅ Admin' : 'ដូរ') + '</button>');
+  function fillWho() {
+    var dt = document.getElementById('swDate').value, r = rowForDate(dt) || {}, h = '';
+    cols.forEach(function (c) { if (r[c.id] && !(dt === dateA && c.id === fieldA)) h += '<option value="' + c.id + '">' + escapeHtml(c.label) + ' — ' + escapeHtml(r[c.id]) + '</option>'; });
+    document.getElementById('swWho').innerHTML = h || '<option value="">(គ្មានអ្នកយាមថ្ងៃនោះ)</option>';
+  }
+  fillWho();
+  document.getElementById('swDate').addEventListener('change', fillWho);
+  document.getElementById('swGo').addEventListener('click', function () {
+    var dateB = document.getElementById('swDate').value, fieldB = document.getElementById('swWho').value;
+    if (!fieldB) { showToast('សូមជ្រើសអ្នកដែលត្រូវដូរ'); return; }
+    var valB = (rowForDate(dateB) || {})[fieldB];
+    var byEl = document.getElementById('rqBy'), by = byEl ? byEl.value.trim() : '';
+    closeCellMenu();
+    if (asRequest) {
+      var colA = columnById(fieldA), colB = columnById(fieldB);
+      sendRequest({ type: 'swap', date: dateA, field: fieldA, fieldLabel: colA ? colA.label : '', value: valA,
+        targetDate: dateB, targetField: fieldB, targetLabel: colB ? colB.label : '', targetValue: valB, by: by || getDeviceName() });
+    } else {
+      if (!requireEdit(dateA.slice(0, 7))) return;
+      performSwap(dateA, fieldA, dateB, fieldB);
+    }
+  });
+}
+
+// ---- Admin: ទទួលនិងដោះស្រាយសំណើ (បង្ហាញក្នុងផ្ទាំងកំណត់ត្រាកែប្រែ) ----
+var REQUESTS = [], requestsUnsub = null;
+function syncRequestsListener() {
+  if (isOwner && !requestsUnsub) {
+    requestsUnsub = onSnapshot(collection(db, 'scheduleRequests'), function (snap) {
+      REQUESTS = snap.docs.map(function (d) { var o = d.data(); o.id = d.id; return o; });
+      REQUESTS.sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+      renderRequests(); renderOwnerButton();
+    }, function (err) { console.warn('requests', err); });
+  } else if (!isOwner && requestsUnsub) {
+    requestsUnsub(); requestsUnsub = null; REQUESTS = []; renderRequests();
+  }
+}
+function requestSummary(r) {
+  var dd = function (x) { return x.slice(8) + '/' + x.slice(5, 7); };
+  if (r.type === 'delete') return '🗑 ស្នើលុប <b>' + escapeHtml(r.value) + '</b> (' + dd(r.date) + ' · ' + escapeHtml(r.fieldLabel) + ')' + (r.text ? ' — ' + escapeHtml(r.text) : '');
+  if (r.type === 'swap') return '🔄 ស្នើដូរ <b>' + escapeHtml(r.value) + '</b> (' + dd(r.date) + ' · ' + escapeHtml(r.fieldLabel) + ') ↔ <b>' + escapeHtml(r.targetValue || '') + '</b> (' + dd(r.targetDate) + ' · ' + escapeHtml(r.targetLabel || '') + ')';
+  if (r.type === 'add') return '➕ ស្នើបញ្ចូល <b>' + escapeHtml(r.text) + '</b> (' + dd(r.date) + ' · ' + escapeHtml(r.fieldLabel) + ')';
+  return '📝 ' + escapeHtml(r.text) + ' (' + dd(r.date) + ' · ' + escapeHtml(r.fieldLabel) + ')';
+}
+function renderRequests() {
+  var box = document.getElementById('reqWrap');
+  if (!box) return;
+  if (!isOwner || !REQUESTS.length) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div style="border:1.5px solid #f0b429;background:#fff8e6;border-radius:12px;padding:10px 12px;margin-bottom:12px;">' +
+    '<div style="font-weight:700;margin-bottom:8px;">📨 សំណើរង់ចាំ (' + REQUESTS.length + ')</div>' +
+    REQUESTS.map(function (r) {
+      var d = new Date(r.at), when = pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+      var canApply = r.type !== 'note';
+      return '<div style="padding:8px 0;border-top:1px solid #f1deb0;font-size:13px;">' + requestSummary(r) +
+        '<div style="color:#6b7686;font-size:11.5px;margin:2px 0 6px;">ពី ' + escapeHtml(r.by || '—') + ' · ' + when + '</div>' +
+        (canApply ? '<button type="button" class="today-btn" onclick="applyRequest(\'' + r.id + '\')">✔ អនុវត្ត</button> ' : '') +
+        '<button type="button" class="today-btn" onclick="dismissRequest(\'' + r.id + '\')">' + (canApply ? '✖ បដិសេធ' : '✔ បានអាន') + '</button></div>';
+    }).join('') + '</div>';
+}
+function dismissRequest(id) {
+  if (!requireOwner()) return;
+  deleteDoc(doc(db, 'scheduleRequests', id)).catch(function (err) { showToast('⚠ ' + err.message); });
+}
+function applyRequest(id) {
+  if (!requireOwner()) return;
+  var r = REQUESTS.filter(function (x) { return x.id === id; })[0];
+  if (!r) return;
+  var ok = true;
+  if (r.type === 'delete') {
+    var cur = (rowForDate(r.date) || {})[r.field];
+    if (cur !== r.value) { showToast('⚠ ក្រឡានេះបានប្រែរួចហើយ — សូមពិនិត្យ'); return; }
+    ok = saveCellValue(r.date, r.field, '') !== false;
+  } else if (r.type === 'add') {
+    ok = saveCellValue(r.date, r.field, r.text) !== false;
+  } else if (r.type === 'swap') {
+    ok = performSwap(r.date, r.field, r.targetDate, r.targetField);
+  }
+  if (ok) dismissRequest(id);
+}
+window.applyRequest = applyRequest; window.dismissRequest = dismissRequest;
+window.openCellMenu = openCellMenu;
 
 function harvestNames(fields) {
   var set = {};
