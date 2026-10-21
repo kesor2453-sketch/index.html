@@ -605,11 +605,19 @@ function requireOwner() {
   showToast('👁 មើលបានតែប៉ុណ្ណោះ — សូមចុច "ចូលជាម្ចាស់" ដើម្បីកែ');
   return false;
 }
-// លុបកំណត់ត្រាដែលកត់ទុកមុនដល់ខែ (ខែអនាគត) — កត់តាំងពីដល់ខែប៉ុណ្ណោះ
+// ពេលខែមកដល់ (ឬកន្លងទៅ) លុបកំណត់ត្រាដែលកត់មុនដំបូងខែ — ចាប់ផ្តើមកត់ថ្មី ហើយរក្សាទុករហូត
 function purgeFutureLogs() {
   var changed = false;
   STATE.scheduleAll.forEach(function (r) {
-    if (r._log && isFutureMonthKey(String(r.Date || '').slice(0, 7))) { delete r._log; changed = true; }
+    if (!r._log) return;
+    var ym = String(r.Date || '').slice(0, 7);
+    if (isFutureMonthKey(ym)) return;
+    var start = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1).getTime();
+    Object.keys(r._log).forEach(function (f) {
+      var kept = r._log[f].filter(function (e) { return new Date(e.at).getTime() >= start; });
+      if (kept.length !== r._log[f].length) { changed = true; if (kept.length) r._log[f] = kept; else delete r._log[f]; }
+    });
+    if (!Object.keys(r._log).length) delete r._log;
   });
   return changed;
 }
@@ -1834,36 +1842,26 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra, res
   var finished = false;
   function finish(cancel, dir) {
     if (finished) return;
+    var newVal = input.value.trim();
+    if (!cancel && resolver && newVal && newVal !== currentVal) {
+      var best = resolver(newVal);
+      if (!best) {
+        if (dir) { // Enter / ព្រួញ / Tab — មិនអនុញ្ញាតឈ្មោះដែលមិនមានក្នុងបញ្ជីគ្រូពេទ្យ
+          showToast('⚠ "' + newVal + '" មិនមានក្នុងបញ្ជីគ្រូពេទ្យ — សូមរើសឈ្មោះដែលមាន');
+          input.focus(); input.select();
+          return;
+        }
+        cancel = true; // ចុចចេញក្រៅ ជាមួយឈ្មោះមិនត្រឹមត្រូវ → បោះបង់
+      } else newVal = best;
+    }
     finished = true;
     STATE.editing = null;
     cell.style.display = '';
     if (cancel) { renderSchedule(); return; }
-    var newVal = input.value.trim();
-    if (dir && newVal && resolver) { var best = resolver(newVal); if (best) newVal = best; }
     var ok = true;
     if (newVal === currentVal) renderSchedule();
     else ok = saveCellValue(date, field, newVal);
-    if (dir && ok !== false) {
-      if (dir === 'right' && !newVal) {
-        // ក្រឡាទទេ + Enter → រំលងទៅក្រុមបន្ទាប់ (ព្រឹក → យប់)
-        var all = getColumnsForMonth(currentScheduleMonthKey()).filter(function (c) { return c.type !== 'text'; });
-        var ci = all.findIndex(function (c) { return c.id === field; });
-        var lbl = all[ci] && all[ci].label, tf = null;
-        for (var k = ci + 1; k < all.length; k++) { if (all[k].label !== lbl) { tf = all[k].id; break; } }
-        if (tf) {
-          var t2 = document.querySelector('.cell-slot[data-date="' + date + '"][data-field="' + tf + '"]');
-          if (t2) { t2.scrollIntoView({ block: 'nearest', inline: 'nearest' }); openEditor(t2); return; }
-        }
-      }
-      if (dir === 'right' && newVal && !input.dataset.noAutoFill) {
-        var nf = firstEmptyNameField(date);
-        if (nf && nf !== field) {
-          var target = document.querySelector('.cell-slot[data-date="' + date + '"][data-field="' + nf + '"]');
-          if (target) { target.scrollIntoView({ block: 'nearest', inline: 'nearest' }); openEditor(target); return; }
-        }
-      }
-      openCellInDirection(date, field, dir);
-    }
+    if (dir && ok !== false) openCellInDirection(date, field, dir);
   }
   input.addEventListener('keydown', function (e) {
     if (e.isComposing || e.keyCode === 229) return; // កំពុងវាយអក្សរខ្មែរ (IME)
@@ -1872,8 +1870,8 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra, res
     if (e.key === 'Enter') { e.preventDefault(); finish(false, AUTO_JUMP_DIRECTION); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); finish(false, 'down'); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); finish(false, 'up'); }
-    else if (e.key === 'ArrowRight' && !e.shiftKey && selEnd === len) { e.preventDefault(); finish(false, 'right'); }
-    else if (e.key === 'ArrowLeft' && !e.shiftKey && selStart === 0) { e.preventDefault(); finish(false, 'left'); }
+    else if (e.key === 'ArrowRight' && !e.shiftKey) { e.preventDefault(); finish(false, 'right'); }
+    else if (e.key === 'ArrowLeft' && !e.shiftKey) { e.preventDefault(); finish(false, 'left'); }
     else if (e.key === 'Tab') { e.preventDefault(); finish(false, e.shiftKey ? 'left' : 'right'); }
     else if (e.key === 'Escape') { e.preventDefault(); finish(true, null); }
   });
@@ -1922,7 +1920,7 @@ function openEditor(cell) {
   var poolFields = getColumnsForMonth(currentScheduleMonthKey()).filter(function (c) { return c.type === 'name'; }).map(function (c) { return c.id; });
   var fromDoctors = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean);
   var fromHistory = harvestNames(poolFields);
-  var suggestions = fromDoctors.concat(fromHistory);
+  var suggestions = fromDoctors; // តែឈ្មោះក្នុងបញ្ជីគ្រូពេទ្យប៉ុណ្ណោះ
   var seen = {};
   suggestions = suggestions.filter(function (s) { return s && !seen[s] && (seen[s] = true); });
   suggestions.sort(compareDoctorNames);
@@ -1996,7 +1994,7 @@ function saveCellValue(date, field, value) {
   var nowIso = new Date().toISOString();
 
   var logKey = date.slice(0, 7);
-  if (isCurrentMonthKey(logKey)) {
+  if (!isPastMonthKey(logKey)) {
     row._log = row._log || {};
     row._log[field] = row._log[field] || [];
     row._log[field].push({ at: nowIso, value: value, oldValue: oldValue, device: getDeviceName() });
@@ -2302,11 +2300,6 @@ function renderLog() {
   var key = monthKey(y, m);
   var wrap = document.getElementById('logWrap');
 
-  if (isFutureMonthKey(key)) {
-    wrap.innerHTML = '<div class="empty-state">ខែនេះមិនទាន់មកដល់ទេ — កំណត់ត្រានឹងចាប់ផ្តើមកត់ត្រាដោយស្វ័យប្រវត្តិកាលបើដល់ខែនេះ</div>';
-    return;
-  }
-
   var prefix = y + '-' + pad2(m);
   var cols = getColumnsForMonth(key);
   var entries = [];
@@ -2322,14 +2315,16 @@ function renderLog() {
   entries.sort(function (a, b) { return new Date(b.at) - new Date(a.at); });
 
   if (!entries.length) {
-    wrap.innerHTML = isCurrentMonthKey(key)
+    wrap.innerHTML = !isPastMonthKey(key)
       ? '<div class="empty-state">កំពុងកត់ត្រា (ខែនេះ) — មិនទាន់មានការកែប្រែទេ</div>'
       : '<div class="empty-state">ខែនេះបានបញ្ចប់ — មិនមានការកែប្រែត្រូវបានកត់ត្រាទុកទេ</div>';
     return;
   }
 
-  var note = isCurrentMonthKey(key)
-    ? '<div style="color:var(--brand);font-size:12px;font-weight:600;margin-bottom:8px;">● កំពុងកត់ត្រា (ខែនេះ)</div>'
+  var note = isFutureMonthKey(key)
+    ? '<div style="color:var(--sub);font-size:12px;font-weight:600;margin-bottom:8px;">ខែនេះមិនទាន់មកដល់ — កំពុងកត់ទុកមុន ហើយនឹងសម្អាតចោលពេលដល់ខែ រួចចាប់ផ្តើមកត់ត្រាថ្មី (រក្សាទុករហូត)</div>'
+    : isCurrentMonthKey(key)
+    ? '<div style="color:var(--brand);font-size:12px;font-weight:600;margin-bottom:8px;">● កំពុងកត់ត្រា (ខែនេះ) — រក្សាទុករហូត</div>'
     : '<div style="color:var(--sub);font-size:12px;font-weight:600;margin-bottom:8px;">🔒 ខែនេះបានបញ្ចប់ការកត់ត្រា</div>';
 
   var rows = entries.map(function (e) {
