@@ -1502,7 +1502,7 @@ function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
 
 function bindCellClicks() {
   document.querySelectorAll('.cell-slot').forEach(function (cell) {
-    cell.addEventListener('click', function () { openCellMenu(cell); });
+    cell.addEventListener('click', function () { openEditor(cell); });
   });
 }
 
@@ -1875,7 +1875,7 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra, res
 }
 
 function openEditor(cell) {
-  if (!requireEdit()) return;
+  if (!canEditMonth(currentScheduleMonthKey())) { if (!isOwner) openLoginModal(); return; }
   if (STATE.editing) return;
   if (scheduleMonthLocked()) {
     showToast('🔒 ខែនេះត្រូវបានចាក់សោ (ខែបានបញ្ចប់ហើយ) — ចុច "🔓 កែប្រែខែនេះ" ដើម្បីកែ');
