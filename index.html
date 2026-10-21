@@ -228,7 +228,7 @@
       <div class="tab active" data-panel="panel-schedule">កាលវិភាគ</div>
       <div class="tab" data-panel="panel-doctors">គ្រូពេទ្យ</div>
       <div class="tab" data-panel="panel-payroll">ចំនួនថ្ងៃយាម</div>
-      <div class="tab" data-panel="panel-log">កំណត់ត្រាកែប្រែ</div>
+      <div class="tab" data-panel="panel-log" style="display:none;">កំណត់ត្រាកែប្រែ</div>
       <div class="tab admin-tab" id="ownerBtn" onclick="ownerButtonClick()" role="button">🔒 Admin</div>
     </div>
   </header>
@@ -605,7 +605,21 @@ function requireOwner() {
   showToast('👁 មើលបានតែប៉ុណ្ណោះ — សូមចុច "ចូលជាម្ចាស់" ដើម្បីកែ');
   return false;
 }
+// លុបកំណត់ត្រាដែលកត់ទុកមុនដល់ខែ (ខែអនាគត) — កត់តាំងពីដល់ខែប៉ុណ្ណោះ
+function purgeFutureLogs() {
+  var changed = false;
+  STATE.scheduleAll.forEach(function (r) {
+    if (r._log && isFutureMonthKey(String(r.Date || '').slice(0, 7))) { delete r._log; changed = true; }
+  });
+  return changed;
+}
 function renderOwnerButton() {
+  var logTab = document.querySelector('.tab[data-panel="panel-log"]');
+  if (logTab) {
+    logTab.style.display = isOwner ? '' : 'none';
+    if (!isOwner && logTab.classList.contains('active')) { var st = document.querySelector('.tab[data-panel="panel-schedule"]'); if (st) st.click(); }
+  }
+  if (isOwner && dataLoaded && purgeFutureLogs()) persistRemoteState();
   var btn = document.getElementById('ownerBtn');
   if (!btn) return;
   btn.textContent = (isOwner ? '🔓 Admin' : '🔒 Admin') + (isOwner && REQUESTS.length ? ' 📨' + REQUESTS.length : '');
@@ -1988,6 +2002,7 @@ function saveCellValue(date, field, value) {
     row._log[field].push({ at: nowIso, value: value, oldValue: oldValue, device: getDeviceName() });
   }
 
+  purgeFutureLogs();
   renderSchedule();
   showToast('រក្សាទុករួចរាល់ ✓');
 
@@ -2281,6 +2296,8 @@ function loadLog() {
 }
 
 function renderLog() {
+  if (!isOwner) { document.getElementById('logWrap').innerHTML = '<div class="empty-state">🔒 សម្រាប់ Admin ប៉ុណ្ណោះ</div>'; return; }
+  if (purgeFutureLogs() && dataLoaded) persistRemoteState();
   var y = STATE.year, m = STATE.month;
   var key = monthKey(y, m);
   var wrap = document.getElementById('logWrap');
