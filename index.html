@@ -186,6 +186,7 @@
 
   .empty-state{text-align:center;padding:30px;color:var(--sub);font-size:13px;}
 
+  body.not-owner #doctorDeleteToggle, body.not-owner #doctorEditToggle, body.not-owner #addDocForm, body.not-owner #addPhoneForm, body.not-owner #panel-doctors .col-del{display:none !important;}
   @media print{
     @page{ size: landscape; margin: 8mm; }
     *{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
@@ -219,7 +220,7 @@
   }
 </style>
 </head>
-<body>
+<body class="not-owner">
 <div id="app">
 
   <header class="top">
@@ -638,6 +639,8 @@ function purgeFutureLogs() {
   return changed;
 }
 function renderOwnerButton() {
+  document.body.classList.toggle('not-owner', !isOwner);
+  if (!isOwner && typeof doctorEditMode !== 'undefined' && (doctorEditMode || doctorDeleteMode)) { doctorEditMode = false; doctorDeleteMode = false; try { renderDoctors(); } catch (e) {} }
   var logTab = document.querySelector('.tab[data-panel="panel-log"]');
   if (logTab) {
     logTab.style.display = isOwner ? '' : 'none';
