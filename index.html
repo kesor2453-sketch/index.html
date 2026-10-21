@@ -117,8 +117,8 @@
   }
   table.sched tbody tr:hover{background:#fafbfd;}
   table.sched tbody tr.weekend td.date-cell{color:var(--off);}
-  table.sched tbody tr.today{background:#fff3b0;}
-  table.sched tbody tr.today td.date-cell{box-shadow:inset 3px 0 0 var(--warn); font-weight:800;}
+  table.sched tbody tr.today, table.sched tbody tr.today td:not(.date-cell){background:#dff5e5 !important;}
+  table.sched tbody tr.today td.date-cell{box-shadow:inset 3px 0 0 #2e9e5b; font-weight:800; background:#dff5e5 !important;}
   table.sched tbody tr.auto-off{background:#fdf4f4;}
   td.date-cell{font-weight:700;white-space:nowrap;text-align:left;padding-left:10px !important;}
   td.date-cell .dow{display:block;font-weight:500;color:var(--sub);font-size:10.8px;}
@@ -213,6 +213,9 @@
     .cell-slot{ min-height:0 !important; padding:1px 2px !important; font-size:9.5px !important; line-height:1.15 !important; border:none !important; }
     table.sched th.grp-start, table.sched td.grp-start{ border-left-width:5px !important; }
     tr{ page-break-inside:avoid; }
+    table.sched tbody tr.today, table.sched tbody tr.today td{ background:transparent !important; box-shadow:none !important; font-weight:inherit !important; }
+    table.sched tbody tr.today td.date-cell{ background:#f7f9fd !important; font-weight:700 !important; }
+    table.sched tbody tr.weekend.today td.date-cell{ background:#fdecec !important; }
   }
 </style>
 </head>
