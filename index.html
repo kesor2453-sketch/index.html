@@ -442,7 +442,20 @@ function getColumnsForMonth(ym) {
     var template = (STATE.columnsTemplate && STATE.columnsTemplate.length) ? STATE.columnsTemplate : DEFAULT_COLUMNS;
     STATE.columnsByMonth[ym] = JSON.parse(JSON.stringify(template));
   }
+  if (ym < '2026-10' && typeof dataLoaded !== 'undefined' && dataLoaded) trimExtraNightColumns(ym);
   return STATE.columnsByMonth[ym];
+}
+
+// មុនខែ តុលា 2026 កាឡោនយប់មានតែ ១ — កាត់កាឡោនយប់លើស ប្រសិនបើគ្មានទិន្នន័យ
+function trimExtraNightColumns(ym) {
+  var cols = STATE.columnsByMonth[ym];
+  var nights = cols.filter(function (c) { return c.type === 'name' && c.label === 'យប់'; });
+  if (nights.length < 2) return;
+  var extra = nights.slice(1).filter(function (c) {
+    return !STATE.scheduleAll.some(function (r) { return String(r.Date || '').indexOf(ym) === 0 && r[c.id]; });
+  });
+  if (!extra.length) return;
+  STATE.columnsByMonth[ym] = cols.filter(function (c) { return extra.indexOf(c) === -1; });
 }
 
 // Propagates an add/delete of a name-column made while viewing `fromYm`
