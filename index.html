@@ -188,6 +188,8 @@
 
   body.not-owner #doctorDeleteToggle, body.not-owner #doctorEditToggle, body.not-owner #addDocForm, body.not-owner #addPhoneForm, body.not-owner #panel-doctors .col-del{display:none !important;}
   body.not-owner .doc-color-input{pointer-events:none;opacity:.45;}
+  body.not-owner .doc-time{display:none;}
+    .time-btn{margin-left:4px;cursor:pointer;font-size:11px;opacity:.55;} .time-btn:hover{opacity:1;}
   @media print{
     @page{ size: landscape; margin: 8mm; }
     *{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
@@ -579,6 +581,7 @@ function seedDefaultDoctors() {
 }
 
 var editOpenMonths = {}; // ខែដែលម្ចាស់បើកឲ្យគ្រប់គ្នាបំពេញ { '2026-10': true } (រក្សាក្នុង scheduleApp/settings)
+var timeDays = {}; // ថ្ងៃដែល Admin បើកឲសួរម៉ោងសម្រាប់គ្រូពេទ្យគ្រប់រូប { '2026-10-24': true }
 var openFrom = null, openTo = null; // បើកអូតូពីខែ openFrom រហូតដល់មុនខែ openTo (បើគ្មាន openTo = បើកជានិច្ច)
 function monthOpenForAll(ym) {
   if (editOpenMonths[ym]) return true;
@@ -604,6 +607,16 @@ function renderEditOpenButton() {
   b.textContent = on ? ('🟢 ខែ ' + lbl + ' បើកឲ្យគ្រប់គ្នាបំពេញ (ចុចបិទ · ខែបន្ទាប់ៗបើកអូតូ)') : ('🔴 ខែ ' + lbl + ' បិទ — ចុចដើម្បីបើកឲ្យគ្រប់គ្នាបំពេញ');
   b.style.background = on ? '#e8f5e9' : '#fdeaea';
 }
+function toggleTimeDay(dateStr) {
+  if (!requireOwner()) return;
+  var next = {};
+  Object.keys(timeDays).forEach(function (k) { if (timeDays[k] && k !== dateStr) next[k] = true; });
+  var on = !timeDays[dateStr];
+  if (on) next[dateStr] = true;
+  timeDays = next; renderSchedule();
+  showToast(on ? '⏰ ថ្ងៃទី ' + dateStr.slice(8) + ' — បើកសួរម៉ោងសម្រាប់គ្រូពេទ្យគ្រប់រូប' : 'ថ្ងៃទី ' + dateStr.slice(8) + ' — បិទការសួរម៉ោង (សួរតែ Dr.Ka Seyla)');
+  setDoc(settingsDocRef, { timeDays: next }, { mergeFields: ['timeDays'] }).catch(function (err) { showToast('⚠ ' + err.message); });
+}
 function toggleEditOpen() {
   if (!requireOwner()) return;
   var ym = currentScheduleMonthKey();
@@ -615,7 +628,7 @@ function toggleEditOpen() {
   } else if (nFrom && ym >= nFrom && (!nTo || ym < nTo)) {
     if (ym === nFrom) { nFrom = null; nTo = null; } else { nTo = ym; } // បិទពីខែនេះទៅមុខ
   }
-  setDoc(settingsDocRef, { editOpenMonths: next, openFrom: nFrom || null, openTo: nTo || null }).catch(function (err) { showToast('⚠ ' + err.message); });
+  setDoc(settingsDocRef, { editOpenMonths: next, openFrom: nFrom || null, openTo: nTo || null }, { mergeFields: ['editOpenMonths', 'openFrom', 'openTo'] }).catch(function (err) { showToast('⚠ ' + err.message); });
 }
 window.toggleEditOpen = toggleEditOpen;
 function requireOwner() {
@@ -1077,6 +1090,7 @@ document.addEventListener('DOMContentLoaded', function () {
   onSnapshot(settingsDocRef, function (ss) {
     var em = (ss.exists() && ss.data().editOpenMonths) || {};
     editOpenMonths = em;
+    timeDays = (ss.exists() && ss.data().timeDays) || {};
     openFrom = (ss.exists() && ss.data().openFrom) || null;
     openTo = (ss.exists() && ss.data().openTo) || null;
     try { if (firstSnapshotHandled) renderSchedule(); } catch (e) {}
@@ -1351,7 +1365,7 @@ function renderSchedule() {
     if (isAutoOff) trClasses.push('auto-off');
 
     html += '<tr class="' + trClasses.join(' ') + '">';
-    html += '<td class="date-cell">' + d + '/' + pad2(m) +
+    html += '<td class="date-cell" data-date="' + dateStr + '">' + d + '/' + pad2(m) +
       '<span class="dow">' + DOW_KM[dowName] +
       '</span></td>';
 
@@ -1508,9 +1522,15 @@ function contrastTextFor(hex) {
 }
 function getNameColors(name) {
   if (!name) return { bg: null, text: '#1c2430' };
-  var doc = STATE.doctors.filter(function (d) { return d.NameSPV === name; })[0];
+  var bname = baseDoctorName(name);
+  function cmp(x) { return String(x || '').toLowerCase().replace(/[\s\u00a0\u200b]+/g, ''); }
+  var full = cmp(String(name).split('(')[0]);
+  var doc = STATE.doctors.filter(function (d) { return d.NameSPV === bname; })[0]
+    || STATE.doctors.filter(function (d) { return cmp(d.NameSPV) === cmp(bname); })[0]
+    || STATE.doctors.filter(function (d) { var k = cmp(d.NameSPV); return k && full.indexOf(k) === 0; })
+        .sort(function (x, y) { return cmp(y.NameSPV).length - cmp(x.NameSPV).length; })[0];
   if (doc && doc.color) return { bg: doc.color, text: contrastTextFor(doc.color) };
-  var key = doc ? doc.ID : name;
+  var key = doc ? doc.ID : bname;
   if (MANUAL_DOCTOR_COLORS[key]) return MANUAL_DOCTOR_COLORS[key];
   return { bg: null, text: NAME_COLOR_PALETTE[hashString(key) % NAME_COLOR_PALETTE.length] };
 }
@@ -1827,8 +1847,29 @@ function neighborCell(date, field, dir) {
 }
 
 // ជ្រើសឈ្មោះល្អបំផុតពីអក្សរដែលវាយមិនពេញ (មិនគិត Dr. / ទំហំអក្សរ / ដកឃ្លា)
-function bestDoctorMatch(typed, list) {
-  function strip(x) { return normName(baseDoctorName(x)).replace(/^dr\.?\s*/, ''); }
+// បំបែកអក្សរដែលវាយ ជា ឈ្មោះគ្រូពេទ្យ + អក្សរបន្ថែម
+function splitTyped(typed, list) {
+  typed = String(typed || '').trim();
+  if (!typed) return null;
+  var whole = typed.indexOf('(') === -1 ? bestDoctorMatchStrict(typed, list) : null;
+  if (whole) return { name: whole, rest: '' };
+  function nk(x) { return String(x).toLowerCase().replace(/^dr\.?\s*/, '').replace(/\s+/g, ''); }
+  for (var k = typed.length - 1; k > 0; k--) {
+    var ch = typed.charAt(k), sep = (ch === '(' || /\s/.test(ch));
+    var base = typed.slice(0, k).trim(), rest = typed.slice(k).trim();
+    if (!base || !rest || base.indexOf('(') !== -1) continue;
+    var hit = bestDoctorMatchStrict(base, list);
+    if (!hit) continue;
+    // មិនមានដកឃ្លា៖ ទទួលតែពេលឈ្មោះគ្រប់ ឬអក្សរបន្ថែមមិនមែនអក្សរឡាតាំង (ខ្មែរ/លេខ/សញ្ញា)
+    if (!sep && nk(base) !== nk(hit) && /^[A-Za-z]/.test(rest)) continue;
+    return { name: hit, rest: rest };
+  }
+  return null;
+}
+function isKaSeyla(n) { return normName(baseDoctorName(n)).indexOf(LAST_DOCTOR_KEY) !== -1; }
+function bestDoctorMatchStrict(typed, list) { return bestDoctorMatch(typed, list, true); }
+function bestDoctorMatch(typed, list, strict) {
+  function strip(x) { var t = String(x || ''), ix = t.indexOf('('); return normName(ix === -1 ? t : t.slice(0, ix)).replace(/^dr\.?\s*/, ''); }
   var q = strip(typed).replace(/\s+/g, '');
   if (!q) return null;
   function key(x) { return strip(x).replace(/\s+/g, ''); }
@@ -1840,7 +1881,7 @@ function bestDoctorMatch(typed, list) {
     var words = strip(sorted[i]).split(/\s+/);
     if (words.some(function (w) { return w.indexOf(q) === 0; })) hit = sorted[i];
   }
-  for (i = 0; i < sorted.length && !hit; i++) if (key(sorted[i]).indexOf(q) !== -1) hit = sorted[i];
+  if (!strict) for (i = 0; i < sorted.length && !hit; i++) if (key(sorted[i]).indexOf(q) !== -1) hit = sorted[i];
   return hit;
 }
 
@@ -1858,7 +1899,7 @@ function openCellInDirection(date, field, dir) {
 //   ← → .......... រក្សាទុក + លោតឆ្វេង / ស្ដាំ (តែពេល cursor នៅដើម / ចុងអក្សរ — បើមិនដូច្នោះ ព្រួញរំកិល cursor ធម្មតា)
 //   Tab / Shift+Tab  ស្ដាំ / ឆ្វេង
 //   Esc .......... បោះបង់
-function wireEditorInput(input, cell, date, field, currentVal, onInputExtra, resolver) {
+function wireEditorInput(input, cell, date, field, currentVal, onInputExtra, resolver, askExtra) {
   var finished = false;
   function finish(cancel, dir) {
     if (finished) return;
@@ -1867,12 +1908,24 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra, res
       var best = resolver(newVal);
       if (!best) {
         if (dir) { // Enter / ព្រួញ / Tab — មិនអនុញ្ញាតឈ្មោះដែលមិនមានក្នុងបញ្ជីគ្រូពេទ្យ
-          showToast('⚠ "' + newVal + '" មិនមានក្នុងបញ្ជីគ្រូពេទ្យ — សូមរើសឈ្មោះដែលមាន');
+          showToast(resolver.msg || ('⚠ "' + newVal + '" មិនមានក្នុងបញ្ជីគ្រូពេទ្យ — សូមរើសឈ្មោះដែលមាន'));
+          resolver.msg = '';
           input.focus(); input.select();
           return;
         }
         cancel = true; // ចុចចេញក្រៅ ជាមួយឈ្មោះមិនត្រឹមត្រូវ → បោះបង់
       } else newVal = best;
+      // សួរម៉ោង (Dr.Ka Seyla) មុនរក្សាទុក
+      if (askExtra && dir && !input.dataset.asked && !input.dataset.asking && askExtra(newVal)) {
+        input.dataset.asking = '1';
+        showTimeDialog(newVal, function (v) {
+          delete input.dataset.asking;
+          if (v === null) { input.focus(); return; }
+          input.value = v; input.dataset.asked = '1';
+          finish(false, dir);
+        });
+        return;
+      }
     }
     finished = true;
     STATE.editing = null;
@@ -1902,8 +1955,77 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra, res
     });
   }
   input.addEventListener('blur', function () {
-    setTimeout(function () { finish(false, null); }, 80);
+    setTimeout(function () {
+      var ae = document.activeElement;
+      if (input.dataset.asking) return; // កំពុងបើកផ្ទាំងសួរម៉ោង
+      if (ae && ae !== input && cell.contains(ae)) return;
+      finish(false, null);
+    }, 80);
   });
+  return finish;
+}
+
+// Dr.Ka Seyla ដែលមិនទាន់មានម៉ោង → សួរម៉ោង
+function needsTime(resolved) { return resolved.indexOf('(') === -1 && !/\s\S/.test(resolved.slice(baseDoctorName(resolved).length)); }
+// ⏰ ក្នុងបញ្ជីគ្រូពេទ្យ — សួរថ្ងៃទី + វេន + ម៉ោង រួចដាក់ក្នុងកាលវិភាគ
+function openDoctorTimeDialog(name) {
+  if (!requireOwner()) return;
+  var ym = currentScheduleMonthKey(), y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  var todayD = (todayYM() === ym) ? new Date().getDate() : 1;
+  var dayOpts = '';
+  for (var d = 1; d <= daysInMonth(y, m); d++) dayOpts += '<option value="' + d + '"' + (d === todayD ? ' selected' : '') + '>' + d + '/' + pad2(m) + '</option>';
+  var PRESETS = ['8am-11am', '16pm-19pm'];
+  var ov = cellMenuShell('⏰ ' + escapeHtml(name) + '<div style="font-weight:500;font-size:12.5px;color:#6b7686;">ថ្ងៃទី និងម៉ោងធ្វើការ</div>',
+    '<select id="dtDay" style="' + CM_INP + '">' + dayOpts + '</select>' +
+    '<select id="dtWhich" style="' + CM_INP + '"></select>' +
+    PRESETS.map(function (t) { return '<button type="button" data-t="' + t + '" style="' + CM_BTN + '">' + t + '</button>'; }).join('') +
+    '<div style="display:flex;gap:6px;margin-bottom:10px;"><input id="dtFrom" type="text" placeholder="ចាប់ពី (9am)" style="' + CM_INP + 'margin:0;"><input id="dtTo" type="text" placeholder="ដល់ (12pm)" style="' + CM_INP + 'margin:0;"></div>' +
+    '<button type="button" id="dtOk" style="' + CM_GO + '">យល់ព្រម (Enter)</button>' +
+    '<button type="button" id="dtNone" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">គ្មានម៉ោង (ដកម៉ោងចេញ)</button>');
+  var cols = getColumnsForMonth(ym).filter(function (c) { return c.type === 'name'; });
+  function dateStr() { return ym + '-' + pad2(Number(document.getElementById('dtDay').value)); }
+  function fillWhich() {
+    var r = rowForDate(dateStr()) || {}, h = '';
+    cols.forEach(function (c) { if (r[c.id] && baseDoctorName(r[c.id]) === name) h += '<option value="' + c.id + '">' + escapeHtml(c.label) + ' — ' + escapeHtml(r[c.id]) + '</option>'; });
+    document.getElementById('dtWhich').innerHTML = h || '<option value="">(គ្មានវេនថ្ងៃនោះ)</option>';
+  }
+  fillWhich();
+  document.getElementById('dtDay').addEventListener('change', fillWhich);
+  function apply(t) {
+    var field = document.getElementById('dtWhich').value;
+    if (!field) { showToast('⚠ ' + name + ' មិនមានវេនថ្ងៃនោះទេ'); return; }
+    var dt = dateStr();
+    closeCellMenu();
+    if (!requireEdit(ym)) return;
+    saveCellValue(dt, field, name + (t ? '(' + t + ')' : ''));
+  }
+  ov.querySelectorAll('button[data-t]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.t); }); });
+  var f = document.getElementById('dtFrom'), t2 = document.getElementById('dtTo');
+  function ok() { var a = f.value.trim(), b = t2.value.trim(); apply(a && b ? a + '-' + b : (a || b)); }
+  document.getElementById('dtOk').addEventListener('click', ok);
+  document.getElementById('dtNone').addEventListener('click', function () { apply(''); });
+  [f, t2].forEach(function (el) { el.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } if (e.key === 'Escape') closeCellMenu(); }); });
+}
+window.openDoctorTimeDialog = openDoctorTimeDialog;
+
+function showTimeDialog(resolved, done, dateLabel) {
+  var name = baseDoctorName(resolved);
+  var PRESETS = ['8am-11am', '16pm-19pm'];
+  var settled = false;
+  function out(v) { if (settled) return; settled = true; closeCellMenu(); done(v === null ? null : name + (v ? '(' + v + ')' : '')); }
+  var ov = cellMenuShell('⏰ ' + (dateLabel ? escapeHtml(dateLabel) + ' — ' : '') + escapeHtml(name) + '<div style="font-weight:500;font-size:12.5px;color:#6b7686;">ម៉ោងណាដល់ម៉ោងណា?</div>',
+    PRESETS.map(function (t) { return '<button type="button" data-t="' + t + '" style="' + CM_BTN + '">' + t + '</button>'; }).join('') +
+    '<div style="display:flex;gap:6px;margin-bottom:10px;"><input id="tmFrom" type="text" placeholder="ចាប់ពី (9am)" style="' + CM_INP + 'margin:0;"><input id="tmTo" type="text" placeholder="ដល់ (12pm)" style="' + CM_INP + 'margin:0;"></div>' +
+    '<button type="button" id="tmOk" style="' + CM_GO + '">យល់ព្រម (Enter) — បើទទេ = គ្មានម៉ោង</button>' +
+    '<button type="button" id="tmNone" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">គ្មានម៉ោង</button>');
+  ov.querySelectorAll('button[data-t]').forEach(function (b) { b.addEventListener('click', function () { out(b.dataset.t); }); });
+  var f = document.getElementById('tmFrom'), t = document.getElementById('tmTo');
+  function ok() { var a = f.value.trim(), b = t.value.trim(); out(a && b ? a + '-' + b : (a || b)); }
+  document.getElementById('tmOk').addEventListener('click', ok);
+  document.getElementById('tmNone').addEventListener('click', function () { out(''); });
+  [f, t].forEach(function (el) { el.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } if (e.key === 'Escape') out(null); }); });
+  ov.addEventListener('mousedown', function (e) { if (e.target === ov) out(null); });
+  f.focus();
 }
 
 function openEditor(cell) {
@@ -1970,7 +2092,16 @@ function openEditor(cell) {
   nameInput.select();
 
   // លោតស្វ័យប្រវត្តិ៖ ពេលជ្រើសឈ្មោះពីបញ្ជីណែនាំ ឬវាយឈ្មោះគ្រូពេទ្យត្រូវនឹងបញ្ជីពេញលេញ
-  wireEditorInput(nameInput, cell, date, field, currentVal, function (e) {
+  var resolveFn = function (typed) {
+    var sp = splitTyped(typed, suggestions);
+    if (!sp) return bestDoctorMatch(typed, suggestions);
+    if (!sp.rest) return sp.name;
+    var rest = sp.rest;
+    if (rest.charAt(0) === '(') return sp.name + rest + (rest.charAt(rest.length - 1) === ')' ? '' : ')');
+    return sp.name + ' ' + rest;
+  };
+
+  var finishFn = wireEditorInput(nameInput, cell, date, field, currentVal, function (e) {
     var v = nameInput.value.trim();
     if (!v) return false;
     var fromList = !e.inputType || e.inputType === 'insertReplacementText';
@@ -1982,10 +2113,9 @@ function openEditor(cell) {
       var comp = suggestions.filter(function (x) { return x.toLowerCase().indexOf(low) === 0 && x.length > low.length; })[0];
       if (comp) { nameInput.value = comp; nameInput.setSelectionRange(low.length, comp.length); }
     }
-    return fromList || exact;
-  }, function (typed) {
-    return bestDoctorMatch(typed, suggestions);
-  });
+    return fromList; // ជ្រើសពីបញ្ជីណែនាំ = Enter; បើវាយខ្លួនឯង ត្រូវចុច Enter (អាចវាយអក្សរបន្ថែមបាន)
+  }, resolveFn, function (resolved) { return needsTime(resolved) && isKaSeyla(resolved); });
+
 }
 
 function saveCellValue(date, field, value) {
@@ -2059,6 +2189,7 @@ function renderDoctors() {
       return '<div class="doc-item" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
         '<span class="name" style="font-weight:700;font-size:13.5px;' + badgeStyle + '">' + escapeHtml(name) + '</span>' +
         '<span style="display:flex;align-items:center;gap:4px;flex-shrink:0;">' +
+        '<span class="time-btn doc-time" data-name="' + escapeAttr(name) + '" title="ដាក់ម៉ោងធ្វើការ" style="font-size:16px;opacity:1;">⏰</span>' +
         '<input type="color" class="doc-color-input" data-id="' + d.ID + '" value="' + swatchValue + '" title="ប្តូរពណ៌ឈ្មោះ" ' +
         'style="width:28px;height:28px;border:1px solid var(--line);border-radius:6px;padding:0;cursor:pointer;">' +
         delIcon +
@@ -2066,6 +2197,10 @@ function renderDoctors() {
         '</div>';
     }).join('');
   }
+
+  document.querySelectorAll('.doc-time').forEach(function (b) {
+    b.addEventListener('click', function () { openDoctorTimeDialog(b.dataset.name); });
+  });
 
   document.querySelectorAll('.doc-color-input').forEach(function (input) {
     input.addEventListener('change', function () {
@@ -2261,8 +2396,18 @@ function bindPhoneForm() {
 // count as one person's shifts, summed together.
 function baseDoctorName(name) {
   if (!name) return name;
-  var idx = String(name).indexOf('(');
-  return (idx === -1 ? name : name.slice(0, idx)).trim();
+  var str = String(name);
+  var idx = str.indexOf('(');
+  var base = (idx === -1 ? str : str.slice(0, idx)).trim();
+  // អក្សរវាយថែមក្រោយឈ្មោះគ្រូពេទ្យ (មិនចាំបាច់ក្នុងវង់ក្រចក) — រកឈ្មោះគ្រូពេទ្យដែលជាបុព្វបទ
+  var low = base.toLowerCase(), best = null;
+  (STATE.doctors || []).forEach(function (d) {
+    var dn = d.NameSPV; if (!dn) return;
+    var l = dn.toLowerCase();
+    if (low === l) { best = dn; return; }
+    if (low.indexOf(l) === 0 && /\s/.test(low.charAt(l.length)) && (!best || dn.length > best.length)) best = dn;
+  });
+  return best || base;
 }
 
 function computePayrollClient(year, month) {
