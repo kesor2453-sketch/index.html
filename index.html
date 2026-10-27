@@ -189,6 +189,7 @@
   body.not-owner #doctorDeleteToggle, body.not-owner #doctorEditToggle, body.not-owner #addDocForm, body.not-owner #addPhoneForm, body.not-owner #panel-doctors .col-del{display:none !important;}
   body.not-owner .doc-color-input{pointer-events:none;opacity:.45;}
   body.not-owner .doc-time{display:none;}
+  body.not-owner .admin-only{display:none !important;}
     .time-btn{margin-left:4px;cursor:pointer;font-size:11px;opacity:.55;} .time-btn:hover{opacity:1;}
   @media print{
     @page{ size: landscape; margin: 8mm; }
@@ -255,8 +256,9 @@
         <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
           <span id="colTools" class="no-print"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
-          <button type="button" class="today-btn no-print" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
-          <label class="today-btn no-print" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ Sheet (.xlsx) ចូលវិញ">⬆ Restore<input type="file" accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importBackup(this)"></label>
+          <button type="button" class="today-btn no-print" id="imgBtn" onclick="downloadScheduleImage()" title="ទាញកាលវិភាគជារូបភាព (PNG) ដើម្បីផ្ញើ Telegram">🖼 រូបភាព</button>
+          <button type="button" class="today-btn no-print admin-only" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
+          <label class="today-btn no-print admin-only" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ Sheet (.xlsx) ចូលវិញ">⬆ Restore<input type="file" accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importBackup(this)"></label>
         </div>
       </div>
       <div id="scheduleWrap"></div>
@@ -798,6 +800,52 @@ function saveLocalSafetyCopy() {
     localStorage.setItem('rosterSafetyCopies', JSON.stringify(list));
   } catch (e) { /* ignore */ }
 }
+// ===== ទាញកាលវិភាគជារូបភាព (PNG) =====
+function loadH2C(cb) {
+  if (window.html2canvas) { cb(); return; }
+  var sc = document.createElement('script');
+  sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+  sc.onload = cb;
+  sc.onerror = function () { showToast('⚠ មិនអាចផ្ទុកឧបករណ៍បង្កើតរូបភាពបានទេ — ពិនិត្យអ៊ីនធឺណិត'); };
+  document.head.appendChild(sc);
+}
+function downloadScheduleImage() {
+  var box = document.querySelector('#scheduleWrap > div');
+  if (!box) { showToast('មិនទាន់មានកាលវិភាគ'); return; }
+  showToast('កំពុងបង្កើតរូបភាព...');
+  loadH2C(function () {
+    var y = STATE.year, m = STATE.month;
+    var holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-20000px;top:0;width:1100px;background:#fff;padding:16px;font-family:inherit;';
+    var title = document.createElement('div');
+    title.style.cssText = 'text-align:center;font-weight:800;font-size:22px;color:#1c2a44;margin-bottom:10px;';
+    title.textContent = 'កាលវិភាគគ្រូពេទ្យ — ' + MONTH_NAMES_KM[m - 1] + ' ' + y;
+    var clone = box.cloneNode(true);
+    clone.style.overflow = 'visible'; clone.style.boxShadow = 'none';
+    clone.querySelectorAll('.no-print, .col-add, .col-move, .col-del').forEach(function (e) { e.remove(); });
+    clone.querySelectorAll('thead th').forEach(function (e) { e.style.position = 'static'; });
+    clone.querySelectorAll('tr.today, tr.today td').forEach(function (e) { e.style.setProperty('background', 'transparent', 'important'); e.style.boxShadow = 'none'; });
+    clone.querySelectorAll('tr.today td.date-cell').forEach(function (e) { e.style.setProperty('background', '#f7f9fd', 'important'); });
+    clone.querySelectorAll('*').forEach(function (e) { e.style.boxShadow = 'none'; }); // html2canvas គូរ inset shadow ខុស
+    var tbl = clone.querySelector('table'); if (tbl) tbl.style.width = '100%';
+    holder.appendChild(title); holder.appendChild(clone);
+    document.body.appendChild(holder);
+    window.html2canvas(holder, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function (canvas) {
+      document.body.removeChild(holder);
+      canvas.toBlob(function (blob) {
+        if (!blob) { showToast('⚠ បង្កើតរូបភាពមិនបាន'); return; }
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = 'schedule-' + y + '-' + pad2(m) + '.png';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        showToast('បានទាញរូបភាពរួចរាល់ ✓');
+      }, 'image/png');
+    }).catch(function (err) { try { document.body.removeChild(holder); } catch (e) {} showToast('⚠ ' + err.message); });
+  });
+}
+window.downloadScheduleImage = downloadScheduleImage;
+
 function loadXlsxLib(cb) {
   if (window.XLSX) { cb(); return; }
   var sc = document.createElement('script');
@@ -815,6 +863,7 @@ function unionKeys(list, skip) {
 
 // ⬇ Backup → ឯកសារ .xlsx (បើកក្នុង Google Sheets បានភ្លាម: Drive → Upload → បើកជា Google Sheets)
 function exportBackup() {
+  if (!requireOwner()) return;
   loadXlsxLib(function () {
     var b = currentBackupObject();
     function monthCols(ym) {
