@@ -2676,7 +2676,7 @@ function renderPayroll(summary) {
         '<td class="c-m num2">' + c.dayOnly + '</td>' +
         '<td class="c-n num2 g-start">' + c.nightOnly + '</td>' +
         '<td class="c-h"><div style="min-width:150px;">' +
-        '<div style="font-size:12px;line-height:1.3;margin-bottom:4px;white-space:nowrap;"><b>' + c.doneShifts + '</b> វេន (<b>' + (c.hours - c.remainHours) + '</b> ម៉ោង) ធ្វើការ <b>' + c.doneDays + '</b> ថ្ងៃ</div>' +
+        '<div style="font-size:12px;line-height:1.3;margin-bottom:4px;white-space:nowrap;"><b>' + c.doneShifts + '</b> វេន (<b>' + (c.hours - c.remainHours) + '</b> ម៉ោង) នៃវេនសរុប <b>' + (c.doneShifts + c.remShifts) + '</b></div>' +
         '<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;height:10px;background:#cfdcef;border-radius:6px;overflow:hidden;"><div style="width:' + donePct + '%;height:100%;background:' + barCol + ';"></div></div>' +
         '<span style="font-size:12px;font-weight:700;white-space:nowrap;color:#2a4a8a;" title="ម៉ោងត្រូវធ្វើការសរុប">' + c.hours + 'ម៉ោង</span></div></div></td>' +
         '<td class="c-rem num2">' + c.remainHours + '<span style="font-weight:500;font-size:12.5px;">ម៉ោង (' + c.remDays + ' ថ្ងៃ)</span></td>' +
