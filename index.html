@@ -2664,7 +2664,9 @@ function renderPayroll(summary) {
     var N = list[0].daysInMonth, T = list[0].totalHours;
     var rows = list.map(function (c) {
       var st = styleFor(c.name);
-      var col = c.pct >= 75 ? '#d9534f' : (c.pct >= 50 ? '#f0ad4e' : '#2e9e5b');
+      var nc = getNameColors(c.name);
+      var barCol = nc.bg || nc.text || '#2f6fed'; // ពណ៌តាមឈ្មោះគ្រូពេទ្យ
+      var donePct = c.hours ? Math.round((c.hours - c.remainHours) / c.hours * 100) : 0; // ធ្វើបានប៉ុន្មាន → ពេញពេលធ្វើអស់ម៉ោង
       return '<tr>' +
         '<td class="nm"><span style="' + st + 'padding:3px 10px;border-radius:6px;font-weight:700;">' + escapeHtml(c.name) + '</span></td>' +
         '<td class="c-wd num2">' + c.workDays + '</td>' +
@@ -2673,9 +2675,9 @@ function renderPayroll(summary) {
         '<td class="c-24 num2">' + c.full24 + '</td>' +
         '<td class="c-12d num2">' + c.dayOnly + '</td>' +
         '<td class="c-12n num2">' + c.nightOnly + '</td>' +
-        '<td class="c-h num2"><b>' + c.hours + '</b>ម៉ោង <span style="color:#2a4a8a;">(' + c.pct + '%)</span></td>' +
-        '<td class="c-rem"><div style="display:flex;align-items:center;gap:8px;"><div style="width:90px;height:9px;background:#c5e8e3;border-radius:6px;overflow:hidden;"><div style="width:' + (c.hours ? Math.round(c.remainHours / c.hours * 100) : 0) + '%;height:100%;background:#1a9d8f;"></div></div>' +
-        '<span style="font-size:14px;"><b>' + c.remainHours + '</b>ម៉ោង</span></div></td>' +
+        '<td class="c-h"><div style="display:flex;align-items:center;gap:8px;"><div style="width:90px;height:10px;background:#cfdcef;border-radius:6px;overflow:hidden;" title="ធ្វើរួច ' + donePct + '%"><div style="width:' + donePct + '%;height:100%;background:' + barCol + ';"></div></div>' +
+        '<span style="font-size:14px;white-space:nowrap;"><b>' + c.hours + '</b>ម៉ោង <span style="color:#2a4a8a;">(' + c.pct + '%)</span></span></div></td>' +
+        '<td class="c-rem num2">' + c.remainHours + '<span style="font-weight:500;font-size:12px;">ម៉ោង</span></td>' +
         '<td class="c-off num2">' + c.offDays + '</td>' +
       '</tr>';
     }).join('');
