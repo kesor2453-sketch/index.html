@@ -2641,17 +2641,33 @@ function renderPayroll(summary) {
 
   function table(list) {
     if (!list.length) return '<div class="empty-state" style="padding:14px 0;">មិនមានវេនទេ</div>';
-    return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;">' + list.map(function (c) {
+    var N = list[0].daysInMonth, T = list[0].totalHours;
+    var rows = list.map(function (c) {
       var st = styleFor(c.name);
-      return '<div style="border:1px solid #d6dbe6;border-radius:12px;padding:10px 12px;background:#fff;line-height:1.7;font-size:13.5px;">' +
-        '<div style="font-weight:800;margin-bottom:4px;"><span style="' + st + 'padding:2px 10px;border-radius:6px;">' + escapeHtml(c.name) + '</span></div>' +
-        '<div>ថ្ងៃយាម <b>' + c.workDays + '</b> ថ្ងៃ នៃ ' + c.daysInMonth + ' ថ្ងៃ</div>' +
-        '<div>ព្រឹក <b>' + c.dayShifts + '</b> | យប់ <b>' + c.nightShifts + '</b></div>' +
-        '<div>២៤ម៉ោង <b>' + c.full24 + '</b> ថ្ងៃ · ១២ម៉ោងថ្ងៃ <b>' + c.dayOnly + '</b> · ១២ម៉ោងយប់ <b>' + c.nightOnly + '</b></div>' +
-        '<div>ម៉ោងធ្វើការសរុប <b>' + c.hours + '</b>ម៉ោង នៃ ' + c.totalHours + 'ម៉ោង (' + c.pct + '%)</div>' +
-        '<div>ថ្ងៃឈប់ (Day off) <b>' + c.offDays + '</b> ថ្ងៃ</div>' +
-      '</div>';
-    }).join('') + '</div>';
+      var col = c.pct >= 75 ? '#d9534f' : (c.pct >= 50 ? '#f0ad4e' : '#2e9e5b');
+      return '<tr>' +
+        '<td style="text-align:left;white-space:nowrap;"><span style="' + st + 'padding:3px 10px;border-radius:6px;font-weight:700;">' + escapeHtml(c.name) + '</span></td>' +
+        '<td class="num"><b>' + c.workDays + '</b></td>' +
+        '<td class="num">' + c.dayShifts + '</td>' +
+        '<td class="num">' + c.nightShifts + '</td>' +
+        '<td class="num">' + c.full24 + '</td>' +
+        '<td class="num">' + c.dayOnly + '</td>' +
+        '<td class="num">' + c.nightOnly + '</td>' +
+        '<td style="min-width:150px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:9px;background:#e9edf4;border-radius:6px;overflow:hidden;"><div style="width:' + c.pct + '%;height:100%;background:' + col + ';"></div></div>' +
+        '<span style="white-space:nowrap;font-size:12.5px;"><b>' + c.hours + '</b>ម៉ោង · ' + c.pct + '%</span></div></td>' +
+        '<td class="num" style="color:#6b7686;">' + c.offDays + '</td>' +
+      '</tr>';
+    }).join('');
+    return '<div style="overflow-x:auto;"><table class="pay" style="min-width:640px;"><thead><tr>' +
+      '<th style="text-align:left;">ឈ្មោះ</th>' +
+      '<th style="text-align:right;">ថ្ងៃយាម<div style="font-weight:500;font-size:11px;">នៃ ' + N + ' ថ្ងៃ</div></th>' +
+      '<th style="text-align:right;">ព្រឹក</th><th style="text-align:right;">យប់</th>' +
+      '<th style="text-align:right;">២៤ម៉ោង<div style="font-weight:500;font-size:11px;">ថ្ងៃ</div></th>' +
+      '<th style="text-align:right;">១២ម៉ោង<div style="font-weight:500;font-size:11px;">ថ្ងៃ</div></th>' +
+      '<th style="text-align:right;">១២ម៉ោង<div style="font-weight:500;font-size:11px;">យប់</div></th>' +
+      '<th style="text-align:left;">ម៉ោងធ្វើការសរុប<div style="font-weight:500;font-size:11px;">នៃ ' + T + 'ម៉ោង</div></th>' +
+      '<th style="text-align:right;">ថ្ងៃឈប់<div style="font-weight:500;font-size:11px;">Day off</div></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
   var html = '<div class="pay-grid"><div class="pay-col"><h3 class="spv">SPV</h3>' + table(summary.spv) + '</div></div>';
