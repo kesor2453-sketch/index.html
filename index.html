@@ -230,7 +230,7 @@
   <header class="top">
     <div>
       <h1>កាលវិភាគគ្រូពេទ្យ (SOPHEAK VISAL CLINIC)</h1>
-      <div class="muted">ឧបករណ៍/អ្នកកែ៖ <span id="deviceNameLabel">—</span> <button type="button" id="openEditBtn" onclick="toggleEditOpen()" style="display:none;border:1px solid #d6dbe6;border-radius:999px;padding:3px 10px;font-family:inherit;font-size:12px;cursor:pointer;">🔴 បិទ</button></div>
+      <div class="muted">ឧបករណ៍/អ្នកកែ៖ <span id="deviceNameLabel">—</span> <button type="button" class="admin-only" onclick="openDevicesDialog()" style="border:1px solid #d6dbe6;border-radius:999px;padding:3px 10px;font-family:inherit;font-size:12px;cursor:pointer;background:#fff;">📱 ឧបករណ៍</button> <button type="button" id="openEditBtn" onclick="toggleEditOpen()" style="display:none;border:1px solid #d6dbe6;border-radius:999px;padding:3px 10px;font-family:inherit;font-size:12px;cursor:pointer;">🔴 បិទ</button></div>
     </div>
     <div class="tabs">
       <div class="tab active" data-panel="panel-schedule">កាលវិភាគ</div>
@@ -654,7 +654,67 @@ function purgeFutureLogs() {
   });
   return changed;
 }
+// ===== ឧបករណ៍ Admin ដែលកំពុងចូលប្រើ =====
+var adminDevices = {}, adminDevicesLoaded = false, seenSelfDevice = false;
+function myDeviceId() {
+  var id = '';
+  try { id = localStorage.getItem('deviceId') || ''; } catch (e) {}
+  if (!id) { id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); try { localStorage.setItem('deviceId', id); } catch (e) {} }
+  return id;
+}
+function saveAdminDevices(map) {
+  return setDoc(settingsDocRef, { adminDevices: map }, { mergeFields: ['adminDevices'] }).catch(function (err) { showToast('⚠ ' + err.message); });
+}
+function syncAdminDevice() {
+  if (!adminDevicesLoaded) return;
+  if (!isOwner) { seenSelfDevice = false; return; }
+  var id = myDeviceId();
+  if (adminDevices[id]) { seenSelfDevice = true; return; }
+  if (seenSelfDevice) { // ត្រូវបានលុបចេញពីបញ្ជី → ចាកចេញ
+    seenSelfDevice = false;
+    showToast('ឧបករណ៍នេះត្រូវបានលុបចេញពីបញ្ជី Admin — សូមចូលម្តងទៀត');
+    signOut(auth);
+    return;
+  }
+  var next = JSON.parse(JSON.stringify(adminDevices));
+  next[id] = { name: getDeviceName(), at: new Date().toISOString() };
+  adminDevices = next; seenSelfDevice = true;
+  saveAdminDevices(next);
+}
+function openDevicesDialog() {
+  if (!requireOwner()) return;
+  var me = myDeviceId();
+  function fmt(iso) { var d = new Date(iso); return isNaN(d) ? '' : pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+  function draw() {
+    var ids = Object.keys(adminDevices).sort(function (a, b) { return String((adminDevices[b] || {}).at).localeCompare(String((adminDevices[a] || {}).at)); });
+    var rows = ids.map(function (id) {
+      var d = adminDevices[id] || {};
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #eef1f6;">' +
+        '<div style="flex:1;"><b>' + escapeHtml(d.name || 'ឧបករណ៍') + '</b>' + (id === me ? ' <span style="color:#1f8f4e;font-size:12px;">(ឧបករណ៍នេះ)</span>' : '') +
+        '<div style="color:#6b7686;font-size:12px;">ចូល ' + fmt(d.at) + ' · ' + escapeHtml(id.slice(-4)) + '</div></div>' +
+        (id === me ? '' : '<button type="button" data-id="' + id + '" style="border:1px solid #e0b4b4;background:#fff5f5;color:#c0392b;border-radius:8px;padding:6px 10px;font-family:inherit;cursor:pointer;">លុប</button>') + '</div>';
+    }).join('') || '<div style="color:#6b7686;">មិនទាន់មានឧបករណ៍</div>';
+    var ov = cellMenuShell('📱 ឧបករណ៍ Admin (' + ids.length + ')', rows +
+      '<button type="button" id="devKeep" style="' + CM_BTN + 'margin-top:10px;margin-bottom:8px;color:#c0392b;">លុបទាំងអស់ លើកលែងឧបករណ៍នេះ</button>' +
+      '<button type="button" id="devClose" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>');
+    ov.querySelectorAll('button[data-id]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var next = JSON.parse(JSON.stringify(adminDevices)); delete next[b.dataset.id];
+        adminDevices = next; saveAdminDevices(next); draw();
+      });
+    });
+    document.getElementById('devKeep').addEventListener('click', function () {
+      var next = {}; next[me] = adminDevices[me] || { name: getDeviceName(), at: new Date().toISOString() };
+      adminDevices = next; saveAdminDevices(next); draw(); showToast('បានលុបឧបករណ៍ផ្សេងទាំងអស់ ✓');
+    });
+    document.getElementById('devClose').addEventListener('click', closeCellMenu);
+  }
+  draw();
+}
+window.openDevicesDialog = openDevicesDialog;
+
 function renderOwnerButton() {
+  syncAdminDevice();
   document.body.classList.toggle('not-owner', !isOwner);
   if (!isOwner && typeof doctorEditMode !== 'undefined' && (doctorEditMode || doctorDeleteMode)) { doctorEditMode = false; doctorDeleteMode = false; try { renderDoctors(); } catch (e) {} }
   var logTab = document.querySelector('.tab[data-panel="panel-log"]');
@@ -1142,6 +1202,9 @@ document.addEventListener('DOMContentLoaded', function () {
     timeDays = (ss.exists() && ss.data().timeDays) || {};
     openFrom = (ss.exists() && ss.data().openFrom) || null;
     openTo = (ss.exists() && ss.data().openTo) || null;
+    adminDevices = (ss.exists() && ss.data().adminDevices) || {};
+    adminDevicesLoaded = true;
+    syncAdminDevice();
     try { if (firstSnapshotHandled) renderSchedule(); } catch (e) {}
     renderEditOpenButton();
   }, function () { /* ignore */ });
@@ -2474,7 +2537,8 @@ function computePayrollClient(year, month) {
       var doc = findDoctorByNameClient(name);
       var key = doc ? doc.ID : normName(name);
       var displayName = doc ? doc.NameSPV : name;
-      if (!spvCounts[key]) spvCounts[key] = { name: displayName, dayShifts: 0, nightShifts: 0, shifts: 0 };
+      if (!spvCounts[key]) spvCounts[key] = { name: displayName, dayShifts: 0, nightShifts: 0, shifts: 0, dates: {} };
+      var dd = spvCounts[key].dates[r.Date] || (spvCounts[key].dates[r.Date] = { d: false, n: false });
       // Classify purely by whether the column's current header TEXT contains
       // "យប់" (night) or "ព្រឹក" (morning) — never by the column's id/number.
       // So any number of columns sharing that same header word (e.g. two
@@ -2483,15 +2547,29 @@ function computePayrollClient(year, month) {
       // "column #2" etc. Renaming a header reclassifies it automatically.
       var isNight = col.label.indexOf('យប់') !== -1;
       var isMorning = col.label.indexOf('ព្រឹក') !== -1;
-      if (isNight) spvCounts[key].nightShifts++;
-      else if (isMorning) spvCounts[key].dayShifts++;
-      else spvCounts[key].dayShifts++; // fallback: anything not explicitly "យប់" counts as day
+      if (isNight) { spvCounts[key].nightShifts++; dd.n = true; }
+      else if (isMorning) { spvCounts[key].dayShifts++; dd.d = true; }
+      else { spvCounts[key].dayShifts++; dd.d = true; } // fallback: anything not explicitly "យប់" counts as day
       spvCounts[key].shifts++;
     });
   });
 
-  var list = Object.keys(spvCounts).map(function (k) { return spvCounts[k]; })
-    .sort(function (a, b) { return b.shifts - a.shifts; });
+  var dim = daysInMonth(year, month);
+  var list = Object.keys(spvCounts).map(function (k) {
+    var c = spvCounts[k], full = 0, dayOnly = 0, nightOnly = 0;
+    Object.keys(c.dates).forEach(function (dt) {
+      var x = c.dates[dt];
+      if (x.d && x.n) full++; else if (x.d) dayOnly++; else if (x.n) nightOnly++;
+    });
+    c.daysInMonth = dim;
+    c.workDays = full + dayOnly + nightOnly;
+    c.full24 = full; c.dayOnly = dayOnly; c.nightOnly = nightOnly;
+    c.hours = full * 24 + (dayOnly + nightOnly) * 12;
+    c.totalHours = dim * 24;
+    c.pct = Math.round(c.hours / c.totalHours * 100);
+    c.offDays = dim - c.workDays;
+    return c;
+  }).sort(function (a, b) { return b.shifts - a.shifts; });
 
   return { spv: list };
 }
@@ -2563,13 +2641,17 @@ function renderPayroll(summary) {
 
   function table(list) {
     if (!list.length) return '<div class="empty-state" style="padding:14px 0;">មិនមានវេនទេ</div>';
-    var rows = list.map(function (c) {
-      return '<tr><td>' + escapeHtml(c.name) + '</td>' +
-        '<td class="num">' + c.dayShifts + '</td><td class="num">' + c.nightShifts + '</td><td class="num">' + c.shifts + '</td></tr>';
-    }).join('');
-    return '<table class="pay"><thead><tr><th>ឈ្មោះ</th>' +
-      '<th style="text-align:right;">ព្រឹក</th><th style="text-align:right;">យប់</th><th style="text-align:right;">សរុប</th>' +
-      '</tr></thead><tbody>' + rows + '</tbody></table>';
+    return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;">' + list.map(function (c) {
+      var st = styleFor(c.name);
+      return '<div style="border:1px solid #d6dbe6;border-radius:12px;padding:10px 12px;background:#fff;line-height:1.7;font-size:13.5px;">' +
+        '<div style="font-weight:800;margin-bottom:4px;"><span style="' + st + 'padding:2px 10px;border-radius:6px;">' + escapeHtml(c.name) + '</span></div>' +
+        '<div>ថ្ងៃយាម <b>' + c.workDays + '</b> ថ្ងៃ នៃ ' + c.daysInMonth + ' ថ្ងៃ</div>' +
+        '<div>ព្រឹក <b>' + c.dayShifts + '</b> | យប់ <b>' + c.nightShifts + '</b></div>' +
+        '<div>២៤ម៉ោង <b>' + c.full24 + '</b> ថ្ងៃ · ១២ម៉ោងថ្ងៃ <b>' + c.dayOnly + '</b> · ១២ម៉ោងយប់ <b>' + c.nightOnly + '</b></div>' +
+        '<div>ម៉ោងធ្វើការសរុប <b>' + c.hours + '</b>ម៉ោង នៃ ' + c.totalHours + 'ម៉ោង (' + c.pct + '%)</div>' +
+        '<div>ថ្ងៃឈប់ (Day off) <b>' + c.offDays + '</b> ថ្ងៃ</div>' +
+      '</div>';
+    }).join('') + '</div>';
   }
 
   var html = '<div class="pay-grid"><div class="pay-col"><h3 class="spv">SPV</h3>' + table(summary.spv) + '</div></div>';
