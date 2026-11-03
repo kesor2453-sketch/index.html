@@ -2673,9 +2673,9 @@ function renderPayroll(summary) {
         '<td class="c-24 num2">' + c.full24 + '</td>' +
         '<td class="c-12d num2">' + c.dayOnly + '</td>' +
         '<td class="c-12n num2">' + c.nightOnly + '</td>' +
-        '<td class="c-h"><div style="display:flex;align-items:center;gap:8px;"><div style="width:90px;height:9px;background:#cfdcef;border-radius:6px;overflow:hidden;"><div style="width:' + c.pct + '%;height:100%;background:' + col + ';"></div></div>' +
-        '<span style="font-size:13px;"><b>' + c.hours + '</b>ម៉ោង · ' + c.pct + '%</span></div></td>' +
-        '<td class="c-rem num2">' + c.remainHours + '</td>' +
+        '<td class="c-h num2"><b>' + c.hours + '</b>ម៉ោង <span style="color:#2a4a8a;">(' + c.pct + '%)</span></td>' +
+        '<td class="c-rem"><div style="display:flex;align-items:center;gap:8px;"><div style="width:90px;height:9px;background:#c5e8e3;border-radius:6px;overflow:hidden;"><div style="width:' + (c.hours ? Math.round(c.remainHours / c.hours * 100) : 0) + '%;height:100%;background:#1a9d8f;"></div></div>' +
+        '<span style="font-size:14px;"><b>' + c.remainHours + '</b>ម៉ោង</span></div></td>' +
         '<td class="c-off num2">' + c.offDays + '</td>' +
       '</tr>';
     }).join('');
