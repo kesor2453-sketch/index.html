@@ -200,7 +200,7 @@
   table.paytbl th:last-child,table.paytbl td:last-child{border-right:none;}
   table.paytbl tbody tr:last-child td{border-bottom:none;}
   table.paytbl td.nm{text-align:left;background:#f7f9fd;border-right:1.5px solid #b9c6dc;}
-  table.paytbl .c-wd{background:#e6eefc;} table.paytbl .c-m{background:#fff4d6;} table.paytbl .c-n{background:#e3e8ff;}
+  table.paytbl .g-start{border-left:4px solid #8fa3c4;} table.paytbl .c-wd{background:#e6eefc;} table.paytbl .c-m{background:#fff4d6;} table.paytbl .c-n{background:#e3e8ff;}
   table.paytbl .c-24{background:#dff5e5;} table.paytbl .c-12d{background:#ffe9d1;} table.paytbl .c-12n{background:#ece6ff;}
   table.paytbl .c-h{background:#e4f3ff;} table.paytbl .c-rem{background:#e0f7f4;} table.paytbl .c-off{background:#fdecec;}
   table.paytbl thead .c-wd,table.paytbl thead .c-m,table.paytbl thead .c-n,table.paytbl thead .c-24,table.paytbl thead .c-12d,table.paytbl thead .c-12n,table.paytbl thead .c-h,table.paytbl thead .c-rem,table.paytbl thead .c-off{filter:saturate(1.6) brightness(.97);}
@@ -2574,13 +2574,15 @@ function computePayrollClient(year, month) {
   var nowD = new Date(), todayIso = nowD.getFullYear() + '-' + pad2(nowD.getMonth() + 1) + '-' + pad2(nowD.getDate());
   var list = Object.keys(spvCounts).map(function (k) {
     var c = spvCounts[k], full = 0, dayOnly = 0, nightOnly = 0;
+    var doneShifts = 0, doneDays = 0, remShifts = 0, remDays = 0;
     var remain = 0; // ម៉ោងនៅសល់ — វេនក្រោយថ្ងៃនេះ (ថ្ងៃនេះរាប់ថាបានធ្វើ)
     Object.keys(c.dates).forEach(function (dt) {
       var x = c.dates[dt], h = (x.d && x.n) ? 24 : ((x.d || x.n) ? 12 : 0);
       if (x.d && x.n) full++; else if (x.d) dayOnly++; else if (x.n) nightOnly++;
-      if (dt > todayIso) remain += h;
+      var sh = (x.d ? 1 : 0) + (x.n ? 1 : 0);
+      if (dt > todayIso) { remain += h; remShifts += sh; remDays++; } else { doneShifts += sh; doneDays++; }
     });
-    c.remainHours = remain;
+    c.remainHours = remain; c.doneShifts = doneShifts; c.doneDays = doneDays; c.remShifts = remShifts; c.remDays = remDays;
     c.daysInMonth = dim;
     c.workDays = full + dayOnly + nightOnly;
     c.full24 = full; c.dayOnly = dayOnly; c.nightOnly = nightOnly;
@@ -2670,33 +2672,44 @@ function renderPayroll(summary) {
       return '<tr>' +
         '<td class="nm"><span style="' + st + 'padding:3px 10px;border-radius:6px;font-weight:700;">' + escapeHtml(c.name) + '</span></td>' +
         '<td class="c-wd num2">' + c.workDays + '</td>' +
-        '<td class="c-m num2">' + c.dayShifts + '</td>' +
-        '<td class="c-n num2">' + c.nightShifts + '</td>' +
-        '<td class="c-24 num2">' + c.full24 + '</td>' +
-        '<td class="c-12d num2">' + c.dayOnly + '</td>' +
-        '<td class="c-12n num2">' + c.nightOnly + '</td>' +
-        '<td class="c-h"><div style="display:flex;align-items:center;gap:8px;"><div style="width:90px;height:10px;background:#cfdcef;border-radius:6px;overflow:hidden;" title="ធ្វើរួច ' + donePct + '%"><div style="width:' + donePct + '%;height:100%;background:' + barCol + ';"></div></div>' +
+        '<td class="c-24 num2 g-start">' + c.full24 + '</td>' +
+        '<td class="c-m num2">' + c.dayOnly + '</td>' +
+        '<td class="c-24 num2 g-start">' + c.full24 + '</td>' +
+        '<td class="c-n num2">' + c.nightOnly + '</td>' +
+        '<td class="c-h"><div style="display:flex;align-items:center;gap:8px;"><div class="pay-bar" data-i="' + list.indexOf(c) + '" style="width:90px;height:10px;background:#cfdcef;border-radius:6px;overflow:hidden;cursor:pointer;" title="ចុចមើលចំនួនវេនដែលបានធ្វើ"><div style="width:' + donePct + '%;height:100%;background:' + barCol + ';"></div></div>' +
         '<span style="font-size:14px;white-space:nowrap;"><b>' + c.hours + '</b>ម៉ោង <span style="color:#2a4a8a;">(' + c.pct + '%)</span></span></div></td>' +
         '<td class="c-rem num2">' + c.remainHours + '<span style="font-weight:500;font-size:12px;">ម៉ោង</span></td>' +
         '<td class="c-off num2">' + c.offDays + '</td>' +
       '</tr>';
     }).join('');
-    return '<div class="paybox"><table class="paytbl"><thead><tr>' +
-      '<th class="nm">ឈ្មោះ</th>' +
-      '<th class="c-wd">ចំនួនថ្ងៃធ្វើការសរុប</th>' +
-      '<th class="c-m">ព្រឹក</th><th class="c-n">យប់</th>' +
-      '<th class="c-24">២៤ម៉ោង</th>' +
-      '<th class="c-12d">១២ម៉ោងព្រឹក</th>' +
-      '<th class="c-12n">១២ម៉ោងយប់</th>' +
-      '<th class="c-h">ម៉ោងធ្វើការសរុប<small>នៃ ' + T + 'ម៉ោង</small></th>' +
-      '<th class="c-rem">ម៉ោងនៅសល់<small>មិនទាន់ធ្វើ (ក្រោយថ្ងៃនេះ)</small></th>' +
-      '<th class="c-off">ថ្ងៃឈប់<small>Day off</small></th>' +
-      '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    return '<div class="paybox"><table class="paytbl"><thead>' +
+      '<tr><th class="nm" rowspan="2">ឈ្មោះ</th>' +
+      '<th class="c-wd" rowspan="2">ចំនួនថ្ងៃធ្វើការសរុប</th>' +
+      '<th class="c-m g-start" colspan="2">ព្រឹក</th><th class="c-n g-start" colspan="2">យប់</th>' +
+      '<th class="c-h" rowspan="2">ម៉ោងធ្វើការសរុប<small>នៃ ' + T + 'ម៉ោង</small></th>' +
+      '<th class="c-rem" rowspan="2">ម៉ោងនៅសល់<small>មិនទាន់ធ្វើ (ក្រោយថ្ងៃនេះ)</small></th>' +
+      '<th class="c-off" rowspan="2">ថ្ងៃឈប់<small>Day off</small></th></tr>' +
+      '<tr><th class="c-24 g-start">២៤ម៉ោង</th><th class="c-12d">១២ម៉ោង</th><th class="c-24 g-start">២៤ម៉ោង</th><th class="c-12n">១២ម៉ោង</th></tr>' +
+      '</thead><tbody>' + rows + '</tbody></table></div>';
   }
 
   var html = '<div class="pay-grid"><div class="pay-col"><h3 class="spv">SPV</h3>' + table(summary.spv) + '</div></div>';
 
   document.getElementById('payWrap').innerHTML = html;
+  document.querySelectorAll('.pay-bar').forEach(function (bar) {
+    bar.addEventListener('click', function () {
+      var c = summary.spv[Number(bar.dataset.i)];
+      if (!c) return;
+      var doneH = c.hours - c.remainHours;
+      var ov = cellMenuShell('📊 ' + escapeHtml(c.name),
+        '<div style="line-height:1.9;font-size:14px;">' +
+        '<div>✅ ធ្វើបាន <b>' + c.doneShifts + '</b> វេន (<b>' + doneH + '</b> ម៉ោង) · ' + c.doneDays + ' ថ្ងៃ</div>' +
+        '<div>⏳ នៅសល់ <b>' + c.remShifts + '</b> វេន (<b>' + c.remainHours + '</b> ម៉ោង) · ' + c.remDays + ' ថ្ងៃ</div>' +
+        '<div style="border-top:1px solid #eef1f6;margin-top:6px;padding-top:6px;color:#5a6b8c;">សរុប <b>' + (c.doneShifts + c.remShifts) + '</b> វេន (' + c.hours + ' ម៉ោង) · គិតត្រឹមថ្ងៃនេះ</div></div>' +
+        '<button type="button" id="payClose" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin:12px 0 0;">បិទ</button>');
+      document.getElementById('payClose').addEventListener('click', closeCellMenu);
+    });
+  });
 }
 
 var toastTimer = null;
