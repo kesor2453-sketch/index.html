@@ -202,8 +202,8 @@
   table.paytbl td.nm{text-align:left;background:#f7f9fd;border-right:1.5px solid #b9c6dc;}
   table.paytbl .c-wd{background:#e6eefc;} table.paytbl .c-m{background:#fff4d6;} table.paytbl .c-n{background:#e3e8ff;}
   table.paytbl .c-24{background:#dff5e5;} table.paytbl .c-12d{background:#ffe9d1;} table.paytbl .c-12n{background:#ece6ff;}
-  table.paytbl .c-h{background:#e4f3ff;} table.paytbl .c-off{background:#fdecec;}
-  table.paytbl thead .c-wd,table.paytbl thead .c-m,table.paytbl thead .c-n,table.paytbl thead .c-24,table.paytbl thead .c-12d,table.paytbl thead .c-12n,table.paytbl thead .c-h,table.paytbl thead .c-off{filter:saturate(1.6) brightness(.97);}
+  table.paytbl .c-h{background:#e4f3ff;} table.paytbl .c-rem{background:#e0f7f4;} table.paytbl .c-off{background:#fdecec;}
+  table.paytbl thead .c-wd,table.paytbl thead .c-m,table.paytbl thead .c-n,table.paytbl thead .c-24,table.paytbl thead .c-12d,table.paytbl thead .c-12n,table.paytbl thead .c-h,table.paytbl thead .c-rem,table.paytbl thead .c-off{filter:saturate(1.6) brightness(.97);}
   table.paytbl thead th.nm{background:linear-gradient(#f3f7ff,#e6eefc);text-align:left;}
   table.paytbl tbody td.num2{font-size:15px;font-weight:700;color:#1c2a44;}
   table.paytbl tbody tr:hover td{filter:brightness(.97);}
@@ -2571,12 +2571,16 @@ function computePayrollClient(year, month) {
   });
 
   var dim = daysInMonth(year, month);
+  var nowD = new Date(), todayIso = nowD.getFullYear() + '-' + pad2(nowD.getMonth() + 1) + '-' + pad2(nowD.getDate());
   var list = Object.keys(spvCounts).map(function (k) {
     var c = spvCounts[k], full = 0, dayOnly = 0, nightOnly = 0;
+    var remain = 0; // ម៉ោងនៅសល់ — វេនក្រោយថ្ងៃនេះ (ថ្ងៃនេះរាប់ថាបានធ្វើ)
     Object.keys(c.dates).forEach(function (dt) {
-      var x = c.dates[dt];
+      var x = c.dates[dt], h = (x.d && x.n) ? 24 : ((x.d || x.n) ? 12 : 0);
       if (x.d && x.n) full++; else if (x.d) dayOnly++; else if (x.n) nightOnly++;
+      if (dt > todayIso) remain += h;
     });
+    c.remainHours = remain;
     c.daysInMonth = dim;
     c.workDays = full + dayOnly + nightOnly;
     c.full24 = full; c.dayOnly = dayOnly; c.nightOnly = nightOnly;
@@ -2671,17 +2675,19 @@ function renderPayroll(summary) {
         '<td class="c-12n num2">' + c.nightOnly + '</td>' +
         '<td class="c-h"><div style="display:flex;align-items:center;gap:8px;"><div style="width:90px;height:9px;background:#cfdcef;border-radius:6px;overflow:hidden;"><div style="width:' + c.pct + '%;height:100%;background:' + col + ';"></div></div>' +
         '<span style="font-size:13px;"><b>' + c.hours + '</b>ម៉ោង · ' + c.pct + '%</span></div></td>' +
+        '<td class="c-rem num2">' + c.remainHours + '</td>' +
         '<td class="c-off num2">' + c.offDays + '</td>' +
       '</tr>';
     }).join('');
     return '<div class="paybox"><table class="paytbl"><thead><tr>' +
       '<th class="nm">ឈ្មោះ</th>' +
-      '<th class="c-wd">ថ្ងៃយាម<small>នៃ ' + N + ' ថ្ងៃ</small></th>' +
+      '<th class="c-wd">ចំនួនថ្ងៃធ្វើការសរុប</th>' +
       '<th class="c-m">ព្រឹក</th><th class="c-n">យប់</th>' +
-      '<th class="c-24">២៤ម៉ោង<small>ថ្ងៃ</small></th>' +
-      '<th class="c-12d">១២ម៉ោង<small>ថ្ងៃ</small></th>' +
-      '<th class="c-12n">១២ម៉ោង<small>យប់</small></th>' +
+      '<th class="c-24">២៤ម៉ោង</th>' +
+      '<th class="c-12d">១២ម៉ោងព្រឹក</th>' +
+      '<th class="c-12n">១២ម៉ោងយប់</th>' +
       '<th class="c-h">ម៉ោងធ្វើការសរុប<small>នៃ ' + T + 'ម៉ោង</small></th>' +
+      '<th class="c-rem">ម៉ោងនៅសល់<small>មិនទាន់ធ្វើ (ក្រោយថ្ងៃនេះ)</small></th>' +
       '<th class="c-off">ថ្ងៃឈប់<small>Day off</small></th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
