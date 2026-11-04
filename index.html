@@ -271,6 +271,7 @@
         </div>
         <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
+          <button type="button" class="today-btn admin-only" id="timeModeBtn" onclick="toggleTimeMode()" title="ចុច ⏰ រួចចុចលើឈ្មោះគ្រូពេទ្យ ដើម្បីដាក់ម៉ោងធ្វើការ">⏰</button>
           <span id="colTools" class="no-print"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
           <button type="button" class="today-btn no-print" id="imgBtn" onclick="downloadScheduleImage()" title="ទាញកាលវិភាគជារូបភាព (PNG) ដើម្បីផ្ញើ Telegram">🖼 រូបភាព</button>
           <button type="button" class="today-btn no-print admin-only" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
@@ -731,6 +732,7 @@ window.openDevicesDialog = openDevicesDialog;
 
 function renderOwnerButton() {
   syncAdminDevice();
+  if (!isOwner && timeMode) { timeMode = false; renderTimeModeBtn(); }
   document.body.classList.toggle('not-owner', !isOwner);
   if (!isOwner && typeof doctorEditMode !== 'undefined' && (doctorEditMode || doctorDeleteMode)) { doctorEditMode = false; doctorDeleteMode = false; try { renderDoctors(); } catch (e) {} }
   var logTab = document.querySelector('.tab[data-panel="panel-log"]');
@@ -1690,9 +1692,33 @@ function renderOffCell(dateStr, field, value) {
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
 
+var timeMode = false;
+function renderTimeModeBtn() {
+  var b = document.getElementById('timeModeBtn');
+  if (!b) return;
+  b.style.background = timeMode ? '#fff3b0' : '';
+  b.style.borderColor = timeMode ? '#e0a800' : '';
+  b.style.fontWeight = timeMode ? '800' : '';
+  b.textContent = timeMode ? '⏰ ចុចលើឈ្មោះ' : '⏰';
+}
+function toggleTimeMode() {
+  if (!requireOwner()) return;
+  timeMode = !timeMode;
+  renderTimeModeBtn();
+  showToast(timeMode ? '⏰ បើក — ចុចលើឈ្មោះគ្រូពេទ្យដើម្បីដាក់ម៉ោង (ចុច ⏰ ម្តងទៀតដើម្បីបិទ)' : '⏰ បិទ');
+}
+window.toggleTimeMode = toggleTimeMode;
 function bindCellClicks() {
   document.querySelectorAll('.cell-slot').forEach(function (cell) {
-    cell.addEventListener('click', function () { openEditor(cell); });
+    cell.addEventListener('click', function () {
+      if (timeMode) {
+        var v = cell.dataset.value || '';
+        if (!v) { showToast('⏰ សូមចុចលើក្រឡាដែលមានឈ្មោះគ្រូពេទ្យ'); return; }
+        openDoctorTimeDialog(baseDoctorName(v), cell.dataset.date, cell.dataset.field);
+        return;
+      }
+      openEditor(cell);
+    });
   });
 }
 
@@ -2096,10 +2122,10 @@ function wireEditorInput(input, cell, date, field, currentVal, onInputExtra, res
 // Dr.Ka Seyla ដែលមិនទាន់មានម៉ោង → សួរម៉ោង
 function needsTime(resolved) { return resolved.indexOf('(') === -1 && !/\s\S/.test(resolved.slice(baseDoctorName(resolved).length)); }
 // ⏰ ក្នុងបញ្ជីគ្រូពេទ្យ — សួរថ្ងៃទី + វេន + ម៉ោង រួចដាក់ក្នុងកាលវិភាគ
-function openDoctorTimeDialog(name) {
+function openDoctorTimeDialog(name, presetDate, presetField) {
   if (!requireOwner()) return;
-  var ym = currentScheduleMonthKey(), y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
-  var todayD = (todayYM() === ym) ? new Date().getDate() : 1;
+  var ym = presetDate ? presetDate.slice(0, 7) : currentScheduleMonthKey(), y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  var todayD = presetDate ? Number(presetDate.slice(8)) : ((todayYM() === ym) ? new Date().getDate() : 1);
   var dayOpts = '';
   for (var d = 1; d <= daysInMonth(y, m); d++) dayOpts += '<option value="' + d + '"' + (d === todayD ? ' selected' : '') + '>' + d + '/' + pad2(m) + '</option>';
   var PRESETS = ['8am-11am', '16pm-19pm'];
@@ -2115,7 +2141,10 @@ function openDoctorTimeDialog(name) {
   function fillWhich() {
     var r = rowForDate(dateStr()) || {}, h = '';
     cols.forEach(function (c) { if (r[c.id] && baseDoctorName(r[c.id]) === name) h += '<option value="' + c.id + '">' + escapeHtml(c.label) + ' — ' + escapeHtml(r[c.id]) + '</option>'; });
-    document.getElementById('dtWhich').innerHTML = h || '<option value="">(គ្មានវេនថ្ងៃនោះ)</option>';
+    var sel = document.getElementById('dtWhich');
+    sel.innerHTML = h;
+    if (presetField && sel.querySelector('option[value="' + presetField + '"]') && dateStr() === presetDate) sel.value = presetField;
+    sel.style.display = sel.options.length > 1 ? '' : 'none'; // បង្ហាញតែពេលមានវេនលើសពីមួយ
   }
   fillWhich();
   document.getElementById('dtDay').addEventListener('change', fillWhich);
@@ -2317,7 +2346,6 @@ function renderDoctors() {
       return '<div class="doc-item" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
         '<span class="name" style="font-weight:700;font-size:13.5px;' + badgeStyle + '">' + escapeHtml(name) + '</span>' +
         '<span style="display:flex;align-items:center;gap:4px;flex-shrink:0;">' +
-        '<span class="time-btn doc-time" data-name="' + escapeAttr(name) + '" title="ដាក់ម៉ោងធ្វើការ" style="font-size:16px;opacity:1;">⏰</span>' +
         '<input type="color" class="doc-color-input" data-id="' + d.ID + '" value="' + swatchValue + '" title="ប្តូរពណ៌ឈ្មោះ" ' +
         'style="width:28px;height:28px;border:1px solid var(--line);border-radius:6px;padding:0;cursor:pointer;">' +
         delIcon +
@@ -2325,10 +2353,6 @@ function renderDoctors() {
         '</div>';
     }).join('');
   }
-
-  document.querySelectorAll('.doc-time').forEach(function (b) {
-    b.addEventListener('click', function () { openDoctorTimeDialog(b.dataset.name); });
-  });
 
   document.querySelectorAll('.doc-color-input').forEach(function (input) {
     input.addEventListener('change', function () {
