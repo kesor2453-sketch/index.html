@@ -888,16 +888,24 @@ function loadH2C(cb) {
   document.head.appendChild(sc);
 }
 function downloadScheduleImage() {
+  if (!document.querySelector('#scheduleWrap > div')) { showToast('មិនទាន់មានកាលវិភាគ'); return; }
+  askOrientation('🖼 រូបភាពកាលវិភាគ — បញ្ឈរ ឬ ផ្តេក', makeScheduleImage);
+}
+function makeScheduleImage(orient) {
   var box = document.querySelector('#scheduleWrap > div');
   if (!box) { showToast('មិនទាន់មានកាលវិភាគ'); return; }
   showToast('កំពុងបង្កើតរូបភាព...');
   loadH2C(function () {
     var y = STATE.year, m = STATE.month;
     var holder = document.createElement('div');
-    holder.style.cssText = 'position:fixed;left:-20000px;top:0;width:1100px;background:#fff;padding:16px;font-family:inherit;';
+    holder.className = 'imgcompact';
+    holder.style.cssText = 'position:fixed;left:-20000px;top:0;width:' + (orient === 'landscape' ? 1500 : 1000) + 'px;background:#fff;padding:18px;font-family:inherit;';
+    var cs = document.createElement('style');
+    cs.textContent = '.imgcompact table.sched th,.imgcompact table.sched td{padding:3px 6px !important;} .imgcompact .cell-slot{padding:3px 8px !important;min-height:0 !important;font-size:14px !important;line-height:1.25 !important;} .imgcompact table.sched td.date-cell,.imgcompact table.sched th:first-child{white-space:nowrap;width:1%;} .imgcompact td.date-cell .dow{display:inline !important;margin-left:4px;font-size:11px !important;}';
+    holder.appendChild(cs);
     var title = document.createElement('div');
-    title.style.cssText = 'text-align:center;font-weight:800;font-size:22px;color:#1c2a44;margin-bottom:10px;';
-    title.textContent = 'កាលវិភាគគ្រូពេទ្យ — ' + MONTH_NAMES_KM[m - 1] + ' ' + y;
+    title.style.cssText = 'text-align:left;font-weight:800;font-size:22px;color:#1c2a44;margin-bottom:8px;';
+    title.textContent = MONTH_NAMES_KM[m - 1] + ' ' + y;
     var clone = box.cloneNode(true);
     clone.style.overflow = 'visible'; clone.style.boxShadow = 'none';
     clone.querySelectorAll('.no-print, .col-add, .col-move, .col-del').forEach(function (e) { e.remove(); });
@@ -914,7 +922,7 @@ function downloadScheduleImage() {
         if (!blob) { showToast('⚠ បង្កើតរូបភាពមិនបាន'); return; }
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
-        a.href = url; a.download = 'schedule-' + y + '-' + pad2(m) + '.png';
+        a.href = url; a.download = 'schedule-' + y + '-' + pad2(m) + '-' + orient + '.png';
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
         showToast('បានទាញរូបភាពរួចរាល់ ✓');
@@ -2732,8 +2740,22 @@ function showToast(msg) {
   toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2200);
 }
 
+function askOrientation(title, cb) {
+  var ov = cellMenuShell(title,
+    '<button type="button" data-o="portrait" style="' + CM_BTN + '">📱 បញ្ឈរ</button>' +
+    '<button type="button" data-o="landscape" style="' + CM_BTN + '">🖥 ផ្តេក</button>' +
+    '<button type="button" data-o="x" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>');
+  ov.querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () { closeCellMenu(); if (b.dataset.o !== 'x') cb(b.dataset.o); });
+  });
+}
 function printSchedule() {
-  window.print();
+  askOrientation('🖨️ ព្រីនកាលវិភាគ — ទិសដៅក្រដាស', function (o) {
+    var st = document.getElementById('pageOrient');
+    if (!st) { st = document.createElement('style'); st.id = 'pageOrient'; document.head.appendChild(st); }
+    st.textContent = '@page{ size: A4 ' + o + '; margin: 8mm; }';
+    setTimeout(function () { window.print(); }, 150);
+  });
 }
 window.printSchedule = printSchedule;
 
