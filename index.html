@@ -1521,6 +1521,20 @@ function renderSchedule() {
 
     // បន្ទប់៖ ស្វ័យប្រវត្តិ (ឆ្លាស់តាមថ្ងៃ) ឬ Admin កំណត់ដោយដៃ — ប្រើតែពេលបង្ហាញតាមបន្ទប់
     var slotInfo = {}; // colIndex → {field,value}
+    var alphaRoom = {}; // colIndex → room (បង្ហាញជាស្លាកពេលតម្រៀប A-Z)
+    if (roomSortMode !== 'room') {
+      var gl = {};
+      cols.forEach(function (c, ci) {
+        if (c.type === 'name' && String(c.label).indexOf('ព្រឹក') !== -1) (gl[c.label] = gl[c.label] || []).push(ci);
+      });
+      Object.keys(gl).forEach(function (lb) {
+        var filled = gl[lb].filter(function (ci) { return row[cols[ci].id]; });
+        filled.forEach(function (ci, i2) {
+          var auto = roomFor(dateStr, i2, filled.length);
+          alphaRoom[ci] = auto ? (roomOverride(row, row[cols[ci].id]) || auto) : 0;
+        });
+      });
+    }
     if (roomSortMode === 'room') {
       var byLabel = {};
       cols.forEach(function (c, ci) {
@@ -1545,7 +1559,7 @@ function renderSchedule() {
       var cell;
       if (c.type === 'text') cell = renderOffCell(dateStr, c.id, row[c.id]);
       else if (slotInfo[ci]) cell = renderSlotCell(dateStr, slotInfo[ci].field, slotInfo[ci].value);
-      else cell = renderSlotCell(dateStr, c.id, row[c.id]);
+      else cell = renderSlotCell(dateStr, c.id, row[c.id], alphaRoom[ci] || 0);
       if (isGroupStart(ci)) cell = cell.replace('<td>', '<td class="grp-start">');
       html += cell;
     });
@@ -1794,10 +1808,10 @@ function roomFor(dateStr, pos, n) {
   return (((pos + off) % n) + n) % n + 1;
 }
 function roomBadge(room) {
-  return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;margin-left:6px;padding:0 6px;border-radius:8px;font-size:0.72em;font-weight:700;line-height:1.5;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">បន្ទប់ ' + room + '</span>';
+  return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;margin-left:6px;padding:0 6px;border-radius:8px;font-size:0.72em;font-weight:700;line-height:1.5;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">បន្ទប់ ' + kmNum(room) + '</span>';
 }
 function renderSlotCell(dateStr, field, value, room) {
-  var display = value ? escapeHtml(value) : '—';
+  var display = value ? escapeHtml(value) + (room ? roomBadge(room) : '') : '—';
   var style = value ? ' style="' + styleFor(value) + '"' : '';
   return '<td><div class="cell-slot ' + (value ? 'spv' : 'empty') +
     '"' + style + ' data-date="' + dateStr + '" data-field="' + field + '" data-value="' + escapeAttr(value || '') + '">' +
@@ -1835,6 +1849,11 @@ window.toggleTimeMode = toggleTimeMode;
 function bindCellClicks() {
   document.querySelectorAll('.cell-slot').forEach(function (cell) {
     cell.addEventListener('click', function (ev) {
+      if (!timeMode && ev.target.closest && ev.target.closest('.room-badge')) {
+        ev.stopPropagation();
+        openRoomDialog(cell.dataset.date, baseDoctorName(cell.dataset.value || ''));
+        return;
+      }
       if (roomEditMode && !timeMode) {
         var rv = cell.dataset.value || '';
         if (!rv) { showToast('🚪 សូមចុចលើក្រឡាដែលមានឈ្មោះគ្រូពេទ្យ'); return; }
