@@ -1790,6 +1790,7 @@ function morningItems(row, dateStr) {
 }
 // ចែកបន្ទប់ — មួយបន្ទប់មួយគ្រូពេទ្យ៖ ដោយដៃ (ថ្ងៃនោះ) → ជាប់រហូត (📌) → ឆ្លាស់តាមថ្ងៃលើបន្ទប់ដែលនៅសល់
 function assignRooms(dateStr, row, items) {
+  items = items.slice().sort(function (x, y) { return compareDoctorNames(x.value, y.value); }); // តម្រៀប A-Z ជានិច្ច មិនថាវាយមុនក្រោយ ឬនៅជួរណា
   var res = {}, n = items.length, off = roomDayOffset(dateStr);
   if (off < 0 || !n) return res;
   var taken = {};
