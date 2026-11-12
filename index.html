@@ -1916,20 +1916,7 @@ function bindCellClicks() {
         openRoomDialog(cell.dataset.date, baseDoctorName(cell.dataset.value || ''));
         return;
       }
-      if (roomSortMode === 'room' && !timeMode && cell.dataset.value && roomDayOffset(cell.dataset.date) >= 0 && canEditMonth(cell.dataset.date.slice(0, 7))) {
-        var ov2 = cellMenuShell(escapeHtml(baseDoctorName(cell.dataset.value)),
-          '<button type="button" data-k="e" style="' + CM_BTN + '">✏️ កែឈ្មោះ</button>' +
-          '<button type="button" data-k="r" style="' + CM_BTN + '">🚪 ដូរបន្ទប់ / 📌 ជាប់បន្ទប់</button>' +
-          '<button type="button" data-k="x" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>');
-        ov2.querySelectorAll('button').forEach(function (b) {
-          b.addEventListener('click', function () {
-            closeCellMenu();
-            if (b.dataset.k === 'e') openEditor(cell);
-            else if (b.dataset.k === 'r') openRoomDialog(cell.dataset.date, baseDoctorName(cell.dataset.value));
-          });
-        });
-        return;
-      }
+      if (roomSortMode === 'room') { showToast('👁 ទិដ្ឋភាពបន្ទប់ — មើលតែប៉ុណ្ណោះ សូមប្តូរទៅ A-Z ដើម្បីកែ'); return; }
       if (roomEditMode && !timeMode) {
         var rv = cell.dataset.value || '';
         if (!rv) { showToast('🚪 សូមចុចលើក្រឡាដែលមានឈ្មោះគ្រូពេទ្យ'); return; }
