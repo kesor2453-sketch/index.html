@@ -273,7 +273,7 @@
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
           <button type="button" class="today-btn admin-only" id="timeModeBtn" onclick="toggleTimeMode()" title="ចុច ⏰ រួចចុចលើឈ្មោះគ្រូពេទ្យ ដើម្បីដាក់ម៉ោងធ្វើការ">⏰</button>
           <span id="colTools" class="no-print"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
-          <span class="no-print" style="white-space:nowrap;"><button type="button" class="today-btn" id="rsAlpha" onclick="setRoomSort('alpha')" title="តម្រៀបតាមអក្សរ A-Z">A-Z</button> <button type="button" class="today-btn" id="rsRoom" onclick="setRoomSort('room')" title="តម្រៀបតាមបន្ទប់ 1 2 3">បន្ទប់១ បន្ទប់២ បន្ទប់៣</button> <button type="button" class="today-btn" onclick="roomFs(-2)" title="បន្ថយទំហំអក្សរបន្ទប់">A−</button> <button type="button" class="today-btn" onclick="roomFs(2)" title="បង្កើនទំហំអក្សរបន្ទប់">A+</button> <button type="button" class="today-btn" id="roomEditBtn" onclick="toggleRoomEdit()" title="ដូរបន្ទប់ — ចុចលើឈ្មោះគ្រូពេទ្យ">🚪✎</button></span>
+          <span class="no-print" style="white-space:nowrap;"><button type="button" class="today-btn" id="rsAlpha" onclick="setRoomSort('alpha')" title="តម្រៀបតាមអក្សរ A-Z">A-Z</button> <button type="button" class="today-btn" id="rsRoom" onclick="setRoomSort('room')" title="តម្រៀបតាមបន្ទប់ 1 2 3">បន្ទប់១ បន្ទប់២ បន្ទប់៣</button> <button type="button" class="today-btn" onclick="roomFs(-2)" title="បន្ថយទំហំអក្សរបន្ទប់">A−</button> <button type="button" class="today-btn" onclick="roomFs(2)" title="បង្កើនទំហំអក្សរបន្ទប់">A+</button></span>
           <button type="button" class="today-btn no-print" id="imgBtn" onclick="downloadScheduleImage()" title="ទាញកាលវិភាគជារូបភាព (PNG) ដើម្បីផ្ញើ Telegram">🖼 រូបភាព</button>
           <button type="button" class="today-btn no-print admin-only" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
           <label class="today-btn no-print admin-only" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ Sheet (.xlsx) ចូលវិញ">⬆ Restore<input type="file" accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importBackup(this)"></label>
@@ -1529,10 +1529,8 @@ function renderSchedule() {
       });
       Object.keys(gl).forEach(function (lb) {
         var filled = gl[lb].filter(function (ci) { return row[cols[ci].id]; });
-        filled.forEach(function (ci, i2) {
-          var auto = roomFor(dateStr, i2, filled.length);
-          alphaRoom[ci] = auto ? (roomOverride(row, row[cols[ci].id]) || auto) : 0;
-        });
+        var asg = assignRooms(dateStr, row, filled.map(function (ci) { return { field: cols[ci].id, value: row[cols[ci].id] }; }));
+        filled.forEach(function (ci) { alphaRoom[ci] = asg[cols[ci].id] || 0; });
       });
     }
     if (roomSortMode === 'room') {
@@ -1543,12 +1541,11 @@ function renderSchedule() {
       Object.keys(byLabel).forEach(function (lb) {
         var idxs = byLabel[lb];
         var names = idxs.map(function (ci, pos) { return { field: cols[ci].id, value: row[cols[ci].id] || '', pos: pos }; }).filter(function (x) { return x.value; });
-        var n = names.length;
+        var asg = assignRooms(dateStr, row, names);
         var out = idxs.map(function () { return null; });
         var rest = [];
-        names.forEach(function (x, i2) {
-          var auto = roomFor(dateStr, i2, n);
-          var r = auto ? (roomOverride(row, x.value) || auto) : 0;
+        names.forEach(function (x) {
+          var r = asg[x.field] || 0;
           if (r && r <= out.length && !out[r - 1]) out[r - 1] = x; else rest.push(x);
         });
         rest.forEach(function (x) { for (var q = 0; q < out.length; q++) if (!out[q]) { out[q] = x; break; } });
@@ -1774,24 +1771,87 @@ function roomOverride(row, name) {
   if (!row || !row._room || !name) return 0;
   return row._room[baseDoctorName(name)] || 0;
 }
+function roomPinOf(name) {
+  var d = findDoctorByNameClient(baseDoctorName(name));
+  return (d && d.roomPin) ? +d.roomPin : 0;
+}
+// ជួរក្រុមព្រឹកនៃថ្ងៃមួយ (តម្រៀប A-Z ដោយ sortRowAllGroups រួចហើយ)
+function morningItems(row, dateStr) {
+  var cols = getColumnsForMonth(dateStr.slice(0, 7));
+  var items = [];
+  var label = null;
+  cols.forEach(function (c) {
+    if (c.type === 'name' && String(c.label).indexOf('ព្រឹក') !== -1 && (label === null || label === c.label)) {
+      label = c.label;
+      if (row && row[c.id]) items.push({ field: c.id, value: row[c.id] });
+    }
+  });
+  return items;
+}
+// ចែកបន្ទប់ — មួយបន្ទប់មួយគ្រូពេទ្យ៖ ដោយដៃ (ថ្ងៃនោះ) → ជាប់រហូត (📌) → ឆ្លាស់តាមថ្ងៃលើបន្ទប់ដែលនៅសល់
+function assignRooms(dateStr, row, items) {
+  var res = {}, n = items.length, off = roomDayOffset(dateStr);
+  if (off < 0 || !n) return res;
+  var taken = {};
+  items.forEach(function (x) {
+    var r = roomOverride(row, x.value);
+    if (r && r <= n && !taken[r]) { taken[r] = 1; res[x.field] = r; }
+  });
+  items.forEach(function (x) {
+    if (res[x.field]) return;
+    var r = roomPinOf(x.value);
+    if (r && r <= n && !taken[r]) { taken[r] = 1; res[x.field] = r; }
+  });
+  var free = [];
+  for (var r2 = 1; r2 <= n; r2++) if (!taken[r2]) free.push(r2);
+  var rest = items.filter(function (x) { return !res[x.field]; });
+  rest.forEach(function (x, i) { res[x.field] = free[(((i + off) % free.length) + free.length) % free.length]; });
+  return res;
+}
 function openRoomDialog(date, name) {
   if (!requireEdit()) return;
-  var cur = roomOverride(rowForDate(date), name);
-  var btns = [1, 2, 3].map(function (n) {
-    return '<button type="button" data-r="' + n + '" style="' + CM_BTN + '">🚪 បន្ទប់ ' + n + '</button>';
-  }).join('') +
-    '<button type="button" data-r="0" style="' + CM_BTN + '">↺ ស្វ័យប្រវត្តិ (វិលតាមថ្ងៃ)</button>' +
-    '<button type="button" data-r="x" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>';
-  var ov = cellMenuShell('🚪 ' + escapeHtml(name) + ' — ' + date.split('-').reverse().join('/'), btns);
+  var row = rowForDate(date); if (!row) return;
+  var items = morningItems(row, date);
+  var me = items.filter(function (x) { return baseDoctorName(x.value) === baseDoctorName(name); })[0];
+  if (!me) return;
+  var cur = assignRooms(date, row, items);
+  if (!cur[me.field]) { showToast('🚪 មិនទាន់ចាប់ផ្តើមចែកបន្ទប់ (ចាប់ពី 12/11/2026)'); return; }
+  var n = items.length, pin = roomPinOf(me.value);
+  var rowsHtml = '';
+  for (var r = 1; r <= n; r++) {
+    var who = items.filter(function (x) { return cur[x.field] === r; })[0];
+    rowsHtml += '<div style="display:flex;gap:6px;margin-bottom:8px;">' +
+      '<button type="button" data-a="day" data-r="' + r + '" style="' + CM_BTN + 'margin-bottom:0;flex:1;' + (cur[me.field] === r ? 'border-color:#2f6fed;background:#e6eefc;' : '') + '">🚪 បន្ទប់ ' + kmNum(r) + (who && who !== me ? ' <small style="color:#6b7686;">(' + escapeHtml(baseDoctorName(who.value)) + ')</small>' : '') + '</button>' +
+      '<button type="button" data-a="pin" data-r="' + r + '" style="' + CM_BTN + 'margin-bottom:0;width:auto;' + (pin === r ? 'border-color:#2f6fed;background:#e6eefc;' : '') + '" title="ជាប់បន្ទប់នេះរហូត មិនដូរ">📌</button></div>';
+  }
+  var extra = (pin ? '<button type="button" data-a="unpin" style="' + CM_BTN + '">📌✕ ដោះការជាប់បន្ទប់ ' + kmNum(pin) + '</button>' : '') +
+    '<button type="button" data-a="auto" style="' + CM_BTN + '">↺ ស្វ័យប្រវត្តិ (ថ្ងៃនេះ)</button>' +
+    '<button type="button" data-a="x" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>';
+  var ov = cellMenuShell('🚪 ' + escapeHtml(baseDoctorName(me.value)) + ' — ' + date.split('-').reverse().join('/') +
+    '<div style="font-weight:500;font-size:12px;color:#6b7686;margin-top:3px;">🚪 = ថ្ងៃនេះ · 📌 = ជាប់បន្ទប់នោះរហូត</div>', rowsHtml + extra);
   ov.querySelectorAll('button').forEach(function (b) {
     b.addEventListener('click', function () {
-      var r = b.dataset.r; closeCellMenu();
-      if (r === 'x') return;
-      var row = rowForDate(date); if (!row) return;
-      var key = baseDoctorName(name);
-      row._room = row._room || {};
-      if (r === '0') delete row._room[key]; else row._room[key] = +r;
-      if (!Object.keys(row._room).length) delete row._room;
+      var a = b.dataset.a, r = +b.dataset.r;
+      closeCellMenu();
+      if (a === 'x') return;
+      if (a === 'auto') { delete row._room; if (false) {} }
+      else if (a === 'unpin') { var dd = findDoctorByNameClient(baseDoctorName(me.value)); if (dd) delete dd.roomPin; }
+      else if (a === 'pin') {
+        var dd2 = findDoctorByNameClient(baseDoctorName(me.value));
+        if (!dd2) { showToast('⚠ គ្រូពេទ្យនេះមិនមានក្នុងបញ្ជីទេ'); return; }
+        var clash = STATE.doctors.filter(function (d) { return d !== dd2 && +d.roomPin === r; })[0];
+        if (clash) { showToast('⚠ បន្ទប់ ' + kmNum(r) + ' ជាប់ ' + clash.NameSPV + ' រួចហើយ'); return; }
+        dd2.roomPin = r;
+        delete row._room; // ឲ្យការជាប់មានអានុភាពភ្លាម
+      } else {
+        var other = items.filter(function (x) { return x !== me && cur[x.field] === r; })[0];
+        if (other && roomPinOf(other.value) === r) { showToast('⚠ បន្ទប់ ' + kmNum(r) + ' ជាប់ ' + baseDoctorName(other.value) + ' រហូត'); return; }
+        var map = {}; items.forEach(function (x) { map[x.field] = cur[x.field]; });
+        if (other) map[other.field] = cur[me.field];
+        map[me.field] = r;
+        row._room = {};
+        items.forEach(function (x) { row._room[baseDoctorName(x.value)] = map[x.field]; });
+      }
       persistRemoteState(); scheduleBackup(); renderSchedule();
       showToast('រក្សាទុករួចរាល់ ✓');
     });
@@ -1852,6 +1912,20 @@ function bindCellClicks() {
       if (!timeMode && ev.target.closest && ev.target.closest('.room-badge')) {
         ev.stopPropagation();
         openRoomDialog(cell.dataset.date, baseDoctorName(cell.dataset.value || ''));
+        return;
+      }
+      if (roomSortMode === 'room' && !timeMode && cell.dataset.value && roomDayOffset(cell.dataset.date) >= 0 && canEditMonth(cell.dataset.date.slice(0, 7))) {
+        var ov2 = cellMenuShell(escapeHtml(baseDoctorName(cell.dataset.value)),
+          '<button type="button" data-k="e" style="' + CM_BTN + '">✏️ កែឈ្មោះ</button>' +
+          '<button type="button" data-k="r" style="' + CM_BTN + '">🚪 ដូរបន្ទប់ / 📌 ជាប់បន្ទប់</button>' +
+          '<button type="button" data-k="x" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>');
+        ov2.querySelectorAll('button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            closeCellMenu();
+            if (b.dataset.k === 'e') openEditor(cell);
+            else if (b.dataset.k === 'r') openRoomDialog(cell.dataset.date, baseDoctorName(cell.dataset.value));
+          });
+        });
         return;
       }
       if (roomEditMode && !timeMode) {
