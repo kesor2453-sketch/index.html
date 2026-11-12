@@ -1438,6 +1438,7 @@ var headerEditMode = false;
 var dragColId = null;
 
 function renderSchedule() {
+  ROOM_MEMO = {};
   try { renderEditOpenButton(); } catch (e) {}
   var y = STATE.year, m = STATE.month;
   var nDays = daysInMonth(y, m);
@@ -1790,8 +1791,28 @@ function morningItems(row, dateStr) {
   return items;
 }
 // ចែកបន្ទប់ — មួយបន្ទប់មួយគ្រូពេទ្យ៖ ដោយដៃ (ថ្ងៃនោះ) → ជាប់រហូត (📌) → ឆ្លាស់តាមថ្ងៃលើបន្ទប់ដែលនៅសល់
+var ROOM_MEMO = {};
+function prevDateStr(dateStr) {
+  var p = dateStr.split('-');
+  var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]) - 86400000);
+  return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+}
+// បន្ទប់ថ្ងៃមួយតាមឈ្មោះ {baseName: room} (ប្រើគណនាថ្ងៃបន្ទាប់ កុំឲ្យនៅបន្ទប់ដដែលពីរថ្ងៃជាប់គ្នា)
+function roomMapForDate(dateStr) {
+  if (ROOM_MEMO[dateStr]) return ROOM_MEMO[dateStr];
+  var out = {};
+  var row = rowForDate(dateStr);
+  if (row) {
+    var items = morningItems(row, dateStr);
+    var asg = assignRooms(dateStr, row, items);
+    items.forEach(function (x) { if (asg[x.field]) out[baseDoctorName(x.value)] = asg[x.field]; });
+  }
+  ROOM_MEMO[dateStr] = out;
+  return out;
+}
+// ចែកបន្ទប់ — មួយបន្ទប់មួយគ្រូពេទ្យ៖ ដោយដៃ (ថ្ងៃនោះ) → ជាប់រហូត (📌) → ឆ្លាស់លើបន្ទប់ដែលនៅសល់ (ជៀសបន្ទប់ដូចម្សិលមិញ)
 function assignRooms(dateStr, row, items) {
-  items = items.slice().sort(function (x, y) { return compareDoctorNames(x.value, y.value); }); // តម្រៀប A-Z ជានិច្ច មិនថាវាយមុនក្រោយ ឬនៅជួរណា
+  items = items.slice().sort(function (x, y) { return compareDoctorNames(x.value, y.value); }); // តម្រៀប A-Z ជានិច្ច
   var res = {}, n = items.length, off = roomDayOffset(dateStr);
   if (off < 0 || !n) return res;
   var taken = {};
@@ -1807,7 +1828,18 @@ function assignRooms(dateStr, row, items) {
   var free = [];
   for (var r2 = 1; r2 <= n; r2++) if (!taken[r2]) free.push(r2);
   var rest = items.filter(function (x) { return !res[x.field]; });
-  rest.forEach(function (x, i) { res[x.field] = free[(((i + off) % free.length) + free.length) % free.length]; });
+  var L = free.length;
+  if (!L) return res;
+  var prev = (off > 0 && off < 400) ? roomMapForDate(prevDateStr(dateStr)) : {};
+  var pick = off % L;
+  for (var k = 0; k < L; k++) {
+    var kk = (off + k) % L, ok = true;
+    for (var q = 0; q < rest.length; q++) {
+      if (prev[baseDoctorName(rest[q].value)] === free[(q + kk) % L]) { ok = false; break; }
+    }
+    if (ok) { pick = kk; break; }
+  }
+  rest.forEach(function (x, q) { res[x.field] = free[(q + pick) % L]; });
   return res;
 }
 function openRoomDialog(date, name) {
@@ -1870,11 +1902,11 @@ function roomFor(dateStr, pos, n) {
   return (((pos + off) % n) + n) % n + 1;
 }
 function roomBadge(room, pinned) {
-  return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;margin-left:6px;padding:1px 9px;border-radius:10px;font-size:0.95em;font-weight:700;line-height:1.4;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">' + 'បន្ទប់ ' + kmNum(room) + '</span>';
+  return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;flex:none;margin-left:6px;padding:1px 9px;min-width:3.4em;text-align:center;border-radius:10px;font-size:0.95em;font-weight:700;line-height:1.4;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">' + 'បន្ទប់ ' + kmNum(room) + '</span>';
 }
 function renderSlotCell(dateStr, field, value, room) {
-  var display = value ? escapeHtml(value) + (room ? roomBadge(room, roomPinOf(value) === room) : '') : '—';
-  var style = value ? ' style="' + styleFor(value) + '"' : '';
+  var display = value ? (room ? '<span style="flex:1;text-align:center;">' + escapeHtml(value) + '</span>' + roomBadge(room, false) : escapeHtml(value)) : '—';
+  var style = value ? ' style="' + styleFor(value) + (room ? 'display:flex;align-items:center;justify-content:space-between;' : '') + '"' : '';
   return '<td><div class="cell-slot ' + (value ? 'spv' : 'empty') +
     '"' + style + ' data-date="' + dateStr + '" data-field="' + field + '" data-value="' + escapeAttr(value || '') + '">' +
     display + '</div></td>';
