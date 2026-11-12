@@ -1464,7 +1464,7 @@ function renderSchedule() {
       if (roomSortMode === 'room' && c.type === 'name' && String(c.label).indexOf('ព្រឹក') !== -1) {
         var ths = '';
         for (var q = 0; q < span; q++) {
-          ths += '<th class="group-spv' + ((idx > 0 && q === 0) ? ' grp-start' : '') + '" style="padding:2px;font-size:' + roomFontSize + 'px;">បន្ទប់' + kmNum(q + 1) + '</th>';
+          ths += '<th class="group-spv' + ((idx > 0 && q === 0) ? ' grp-start' : '') + '" style="padding:2px;">បន្ទប់' + kmNum(q + 1) + '</th>';
         }
         return ths;
       }
@@ -1868,7 +1868,7 @@ function roomFor(dateStr, pos, n) {
   return (((pos + off) % n) + n) % n + 1;
 }
 function roomBadge(room) {
-  return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;margin-left:6px;padding:0 6px;border-radius:8px;font-size:0.72em;font-weight:700;line-height:1.5;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">បន្ទប់ ' + kmNum(room) + '</span>';
+  return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;margin-left:6px;padding:1px 9px;border-radius:10px;font-size:0.95em;font-weight:700;line-height:1.4;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">បន្ទប់ ' + kmNum(room) + '</span>';
 }
 function renderSlotCell(dateStr, field, value, room) {
   var display = value ? escapeHtml(value) + (room ? roomBadge(room) : '') : '—';
