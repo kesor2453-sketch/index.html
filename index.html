@@ -735,6 +735,7 @@ function renderOwnerButton() {
   syncAdminDevice();
   if (!isOwner && timeMode) { timeMode = false; renderTimeModeBtn(); }
   document.body.classList.toggle('not-owner', !isOwner);
+  try { if (typeof renderDoctors === 'function' && STATE.doctors.length) renderDoctors(); } catch (e) {}
   try { if (dataLoaded && document.getElementById('payWrap') && document.getElementById('payWrap').innerHTML) loadPayroll(); } catch (e) {}
   if (!isOwner && typeof doctorEditMode !== 'undefined' && (doctorEditMode || doctorDeleteMode)) { doctorEditMode = false; doctorDeleteMode = false; try { renderDoctors(); } catch (e) {} }
   var logTab = document.querySelector('.tab[data-panel="panel-log"]');
@@ -1868,11 +1869,11 @@ function roomFor(dateStr, pos, n) {
   if (off < 0 || !n) return 0;
   return (((pos + off) % n) + n) % n + 1;
 }
-function roomBadge(room) {
-  return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;margin-left:6px;padding:1px 9px;border-radius:10px;font-size:0.95em;font-weight:700;line-height:1.4;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">បន្ទប់ ' + kmNum(room) + '</span>';
+function roomBadge(room, pinned) {
+  return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;margin-left:6px;padding:1px 9px;border-radius:10px;font-size:0.95em;font-weight:700;line-height:1.4;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">' + 'បន្ទប់ ' + kmNum(room) + '</span>';
 }
 function renderSlotCell(dateStr, field, value, room) {
-  var display = value ? escapeHtml(value) + (room ? roomBadge(room) : '') : '—';
+  var display = value ? escapeHtml(value) + (room ? roomBadge(room, roomPinOf(value) === room) : '') : '—';
   var style = value ? ' style="' + styleFor(value) + '"' : '';
   return '<td><div class="cell-slot ' + (value ? 'spv' : 'empty') +
     '"' + style + ' data-date="' + dateStr + '" data-field="' + field + '" data-value="' + escapeAttr(value || '') + '">' +
@@ -2570,6 +2571,10 @@ function renderDoctors() {
       return '<div class="doc-item" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
         '<span class="name" style="font-weight:700;font-size:13.5px;' + badgeStyle + '">' + escapeHtml(name) + '</span>' +
         '<span style="display:flex;align-items:center;gap:4px;flex-shrink:0;">' +
+        (isOwner
+          ? '<select class="doc-pin-select" data-id="' + d.ID + '" title="ជាប់បន្ទប់រហូត" style="font-family:inherit;font-size:12.5px;padding:3px 2px;border:1px solid var(--line);border-radius:6px;background:' + (d.roomPin ? '#e6eefc' : '#fff') + ';">' +
+            '<option value="0">📌 —</option>' + [1, 2, 3].map(function (r) { return '<option value="' + r + '"' + (+d.roomPin === r ? ' selected' : '') + '>📌 បន្ទប់ ' + kmNum(r) + '</option>'; }).join('') + '</select>'
+          : (d.roomPin ? '<span style="font-size:12.5px;font-weight:700;color:#2a4a8a;">📌 បន្ទប់ ' + kmNum(+d.roomPin) + '</span>' : '')) +
         '<input type="color" class="doc-color-input" data-id="' + d.ID + '" value="' + swatchValue + '" title="ប្តូរពណ៌ឈ្មោះ" ' +
         'style="width:28px;height:28px;border:1px solid var(--line);border-radius:6px;padding:0;cursor:pointer;">' +
         delIcon +
@@ -2578,6 +2583,23 @@ function renderDoctors() {
     }).join('');
   }
 
+  document.querySelectorAll('.doc-pin-select').forEach(function (sel) {
+    sel.addEventListener('change', function () {
+      if (!requireOwner()) { renderDoctors(); return; }
+      var doc = STATE.doctors.filter(function (d) { return d.ID === sel.dataset.id; })[0];
+      if (!doc) return;
+      var r = +sel.value;
+      if (r) {
+        var clash = STATE.doctors.filter(function (d) { return d !== doc && +d.roomPin === r; })[0];
+        if (clash) { showToast('⚠ បន្ទប់ ' + kmNum(r) + ' ជាប់ ' + clash.NameSPV + ' រួចហើយ'); renderDoctors(); return; }
+        doc.roomPin = r;
+      } else delete doc.roomPin;
+      persistRemoteState();
+      renderDoctors();
+      renderSchedule();
+      showToast('រក្សាទុករួចរាល់ ✓');
+    });
+  });
   document.querySelectorAll('.doc-color-input').forEach(function (input) {
     input.addEventListener('change', function () {
       var id = input.dataset.id;
