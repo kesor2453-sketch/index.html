@@ -273,6 +273,7 @@
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
           <button type="button" class="today-btn admin-only" id="timeModeBtn" onclick="toggleTimeMode()" title="ចុច ⏰ រួចចុចលើឈ្មោះគ្រូពេទ្យ ដើម្បីដាក់ម៉ោងធ្វើការ">⏰</button>
           <span id="colTools" class="no-print"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
+          <span class="no-print" style="white-space:nowrap;"><button type="button" class="today-btn" id="rsAlpha" onclick="setRoomSort('alpha')" title="តម្រៀបតាមអក្សរ A-Z">A-Z</button> <button type="button" class="today-btn" id="rsRoom" onclick="setRoomSort('room')" title="តម្រៀបតាមបន្ទប់ 1 2 3">🚪 1·2·3</button></span>
           <button type="button" class="today-btn no-print" id="imgBtn" onclick="downloadScheduleImage()" title="ទាញកាលវិភាគជារូបភាព (PNG) ដើម្បីផ្ញើ Telegram">🖼 រូបភាព</button>
           <button type="button" class="today-btn no-print admin-only" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
           <label class="today-btn no-print admin-only" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ Sheet (.xlsx) ចូលវិញ">⬆ Restore<input type="file" accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importBackup(this)"></label>
@@ -734,6 +735,7 @@ function renderOwnerButton() {
   syncAdminDevice();
   if (!isOwner && timeMode) { timeMode = false; renderTimeModeBtn(); }
   document.body.classList.toggle('not-owner', !isOwner);
+  try { if (dataLoaded && document.getElementById('payWrap') && document.getElementById('payWrap').innerHTML) loadPayroll(); } catch (e) {}
   if (!isOwner && typeof doctorEditMode !== 'undefined' && (doctorEditMode || doctorDeleteMode)) { doctorEditMode = false; doctorDeleteMode = false; try { renderDoctors(); } catch (e) {} }
   var logTab = document.querySelector('.tab[data-panel="panel-log"]');
   if (logTab) {
@@ -1057,6 +1059,7 @@ function restoreBySlots(sched) {
       if (c) row[c.id] = v[2];
     });
     if (oldRows[p.date] && oldRows[p.date]._log) row._log = oldRows[p.date]._log;
+    if (oldRows[p.date] && oldRows[p.date]._room) row._room = oldRows[p.date]._room;
     return row;
   });
   STATE.scheduleAll = newRows;
@@ -1080,6 +1083,7 @@ function restoreScheduleOnly(sched) {
     var row = { Date: date };
     ids.forEach(function (id, k) { if (id && sched[i][k + 1] !== '' && sched[i][k + 1] != null) row[id] = String(sched[i][k + 1]); });
     if (oldRows[date] && oldRows[date]._log) row._log = oldRows[date]._log;
+    if (oldRows[date] && oldRows[date]._room) row._room = oldRows[date]._room;
     newRows.push(row);
   }
   if (!newRows.length) throw new Error('រកមិនឃើញជួរកាលវិភាគក្នុងឯកសារទេ');
@@ -1121,6 +1125,7 @@ function restoreFromWorkbook(wb) {
     var row = { Date: date };
     ids.forEach(function (id, k) { if (id && sched[i][k + 1] !== '' && sched[i][k + 1] != null) row[id] = String(sched[i][k + 1]); });
     if (oldRows[date] && oldRows[date]._log) row._log = oldRows[date]._log; // រក្សាកំណត់ត្រាកែប្រែដែលមានស្រាប់
+    if (oldRows[date] && oldRows[date]._room) row._room = oldRows[date]._room;
     newRows.push(row);
   }
   var byMonth = {}, tpl = [];
@@ -1507,8 +1512,34 @@ function renderSchedule() {
       '<span class="dow">' + DOW_KM[dowName] +
       '</span></td>';
 
+    // បន្ទប់៖ ស្វ័យប្រវត្តិតាមទីតាំងក្នុងក្រុមព្រឹក ឬ Admin កំណត់ដោយដៃ
+    var slotInfo = {}; // colIndex → {field,value,room}
+    var grpPos = {};
     cols.forEach(function (c, ci) {
-      var cell = (c.type === 'text') ? renderOffCell(dateStr, c.id, row[c.id], locked) : renderSlotCell(dateStr, c.id, row[c.id], locked);
+      if (c.type === 'name' && String(c.label).indexOf('ព្រឹក') !== -1) {
+        var pos = 0;
+        for (var k = 0; k < ci; k++) if (cols[k].type === 'name' && cols[k].label === c.label) pos++;
+        var v = row[c.id] || '';
+        slotInfo[ci] = { field: c.id, value: v, room: v ? (roomOverride(row, v) || roomFor(dateStr, pos)) : 0, pos: pos, label: c.label };
+      }
+    });
+    if (roomSortMode === 'room') {
+      var byLabel = {};
+      Object.keys(slotInfo).forEach(function (ci) { (byLabel[slotInfo[ci].label] = byLabel[slotInfo[ci].label] || []).push(+ci); });
+      Object.keys(byLabel).forEach(function (lb) {
+        var idxs = byLabel[lb];
+        var items = idxs.map(function (ci) { return slotInfo[ci]; }).sort(function (a, b) {
+          var ra = a.value ? a.room : 99, rb = b.value ? b.room : 99;
+          return ra - rb || a.pos - b.pos;
+        });
+        idxs.forEach(function (ci, i) { slotInfo[ci] = items[i]; });
+      });
+    }
+    cols.forEach(function (c, ci) {
+      var cell;
+      if (c.type === 'text') cell = renderOffCell(dateStr, c.id, row[c.id]);
+      else if (slotInfo[ci]) cell = renderSlotCell(dateStr, slotInfo[ci].field, slotInfo[ci].value, slotInfo[ci].room);
+      else cell = renderSlotCell(dateStr, c.id, row[c.id], 0);
       if (isGroupStart(ci)) cell = cell.replace('<td>', '<td class="grp-start">');
       html += cell;
     });
@@ -1517,6 +1548,7 @@ function renderSchedule() {
   html += '</tbody></table></div>';
   document.getElementById('scheduleWrap').innerHTML = html;
 
+  updateRoomSortButtons();
   bindCellClicks();
 }
 
@@ -1680,8 +1712,62 @@ function styleFor(name) {
   return s;
 }
 
-function renderSlotCell(dateStr, field, value) {
-  var display = value ? escapeHtml(value) : '—';
+// បន្ទប់ consultation ៣ — វិលជាបន្តតាមថ្ងៃ (រាប់ពី 2026-12-12 ដូច្នេះបន្តពីខែមុនដោយស្វ័យប្រវត្តិ)
+var ROOM_COUNT = 3;
+var ROOM_ANCHOR = Date.UTC(2026, 11, 12);
+var ROOM_SORT_KEY = 'roomSortMode';
+var roomSortMode = 'alpha'; // 'alpha' | 'room'
+try { if (localStorage.getItem(ROOM_SORT_KEY) === 'room') roomSortMode = 'room'; } catch (e) {}
+function setRoomSort(mode) {
+  roomSortMode = mode;
+  try { localStorage.setItem(ROOM_SORT_KEY, mode); } catch (e) {}
+  renderSchedule();
+}
+window.setRoomSort = setRoomSort;
+function updateRoomSortButtons() {
+  [['alpha', 'rsAlpha'], ['room', 'rsRoom']].forEach(function (p) {
+    var b = document.getElementById(p[1]); if (!b) return;
+    var on = roomSortMode === p[0];
+    b.style.background = on ? 'var(--brand)' : ''; b.style.color = on ? '#fff' : '';
+  });
+}
+function roomOverride(row, name) {
+  if (!row || !row._room || !name) return 0;
+  return row._room[baseDoctorName(name)] || 0;
+}
+function openRoomDialog(date, name) {
+  if (!requireEdit()) return;
+  var cur = roomOverride(rowForDate(date), name);
+  var btns = [1, 2, 3].map(function (n) {
+    return '<button type="button" data-r="' + n + '" style="' + CM_BTN + '">🚪 បន្ទប់ ' + n + '</button>';
+  }).join('') +
+    '<button type="button" data-r="0" style="' + CM_BTN + '">↺ ស្វ័យប្រវត្តិ (វិលតាមថ្ងៃ)</button>' +
+    '<button type="button" data-r="x" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>';
+  var ov = cellMenuShell('🚪 ' + escapeHtml(name) + ' — ' + date.split('-').reverse().join('/'), btns);
+  ov.querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var r = b.dataset.r; closeCellMenu();
+      if (r === 'x') return;
+      var row = rowForDate(date); if (!row) return;
+      var key = baseDoctorName(name);
+      row._room = row._room || {};
+      if (r === '0') delete row._room[key]; else row._room[key] = +r;
+      if (!Object.keys(row._room).length) delete row._room;
+      persistRemoteState(); scheduleBackup(); renderSchedule();
+      showToast('រក្សាទុករួចរាល់ ✓');
+    });
+  });
+}
+function roomFor(dateStr, pos) {
+  var p = dateStr.split('-');
+  var dayNum = Math.floor((Date.UTC(+p[0], +p[1] - 1, +p[2]) - ROOM_ANCHOR) / 86400000);
+  return (((dayNum + pos) % ROOM_COUNT) + ROOM_COUNT) % ROOM_COUNT + 1;
+}
+function roomBadge(room) {
+  return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;margin-left:6px;padding:0 6px;border-radius:8px;font-size:0.72em;font-weight:700;line-height:1.5;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">បន្ទប់ ' + room + '</span>';
+}
+function renderSlotCell(dateStr, field, value, room) {
+  var display = value ? escapeHtml(value) + (room ? roomBadge(room) : '') : '—';
   var style = value ? ' style="' + styleFor(value) + '"' : '';
   return '<td><div class="cell-slot ' + (value ? 'spv' : 'empty') +
     '"' + style + ' data-date="' + dateStr + '" data-field="' + field + '" data-value="' + escapeAttr(value || '') + '">' +
@@ -1718,7 +1804,12 @@ function toggleTimeMode() {
 window.toggleTimeMode = toggleTimeMode;
 function bindCellClicks() {
   document.querySelectorAll('.cell-slot').forEach(function (cell) {
-    cell.addEventListener('click', function () {
+    cell.addEventListener('click', function (ev) {
+      if (!timeMode && ev.target.closest && ev.target.closest('.room-badge')) {
+        ev.stopPropagation();
+        openRoomDialog(cell.dataset.date, baseDoctorName(cell.dataset.value || ''));
+        return;
+      }
       if (timeMode) {
         var v = cell.dataset.value || '';
         if (!v) { showToast('⏰ សូមចុចលើក្រឡាដែលមានឈ្មោះគ្រូពេទ្យ'); return; }
@@ -2695,6 +2786,15 @@ function renderPayroll(summary) {
 
   function table(list) {
     if (!list.length) return '<div class="empty-state" style="padding:14px 0;">មិនមានវេនទេ</div>';
+    if (!isOwner) { // អ្នកមិនមែន Admin — បង្ហាញតែចំនួនថ្ងៃយាម ព្រឹក យប់ សរុប
+      var simple = list.map(function (c) {
+        var st = styleFor(c.name);
+        return '<tr><td class="nm"><span style="' + st + 'padding:3px 10px;border-radius:6px;font-weight:700;">' + escapeHtml(c.name) + '</span></td>' +
+          '<td class="c-m num2">' + c.dayShifts + '</td><td class="c-n num2">' + c.nightShifts + '</td><td class="c-wd num2">' + (c.dayShifts + c.nightShifts) + '</td></tr>';
+      }).join('');
+      return '<div class="paybox"><table class="paytbl"><thead><tr><th class="nm">ឈ្មោះ</th>' +
+        '<th class="c-m">ព្រឹក<small>ចំនួនថ្ងៃយាម</small></th><th class="c-n">យប់<small>ចំនួនថ្ងៃយាម</small></th><th class="c-wd">សរុប<small>ចំនួនថ្ងៃយាម</small></th></tr></thead><tbody>' + simple + '</tbody></table></div>';
+    }
     var N = list[0].daysInMonth, T = list[0].totalHours;
     var rows = list.map(function (c) {
       var st = styleFor(c.name);
