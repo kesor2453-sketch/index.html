@@ -273,7 +273,7 @@
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
           <button type="button" class="today-btn admin-only" id="timeModeBtn" onclick="toggleTimeMode()" title="ចុច ⏰ រួចចុចលើឈ្មោះគ្រូពេទ្យ ដើម្បីដាក់ម៉ោងធ្វើការ">⏰</button>
           <span id="colTools" class="no-print"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
-          <span class="no-print" style="white-space:nowrap;"><button type="button" class="today-btn" id="rsAlpha" onclick="setRoomSort('alpha')" title="តម្រៀបតាមអក្សរ A-Z">A-Z</button> <button type="button" class="today-btn" id="rsRoom" onclick="setRoomSort('room')" title="តម្រៀបតាមបន្ទប់ 1 2 3">បន្ទប់១ បន្ទប់២ បន្ទប់៣</button> <button type="button" class="today-btn" onclick="roomFs(-2)" title="បន្ថយទំហំអក្សរបន្ទប់">A−</button> <button type="button" class="today-btn" onclick="roomFs(2)" title="បង្កើនទំហំអក្សរបន្ទប់">A+</button></span>
+          <span class="no-print" style="white-space:nowrap;"><button type="button" class="today-btn" id="rsAlpha" onclick="setRoomSort('alpha')" title="តម្រៀបតាមអក្សរ A-Z">A-Z</button> <button type="button" class="today-btn" id="rsRoom" onclick="setRoomSort('room')" title="តម្រៀបតាមបន្ទប់ 1 2 3">បន្ទប់១ បន្ទប់២ បន្ទប់៣</button></span>
           <button type="button" class="today-btn no-print" id="imgBtn" onclick="downloadScheduleImage()" title="ទាញកាលវិភាគជារូបភាព (PNG) ដើម្បីផ្ញើ Telegram">🖼 រូបភាព</button>
           <button type="button" class="today-btn no-print admin-only" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
           <label class="today-btn no-print admin-only" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ Sheet (.xlsx) ចូលវិញ">⬆ Restore<input type="file" accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importBackup(this)"></label>
@@ -1733,8 +1733,8 @@ function styleFor(name) {
 var ROOM_COUNT = 3;
 var ROOM_ANCHOR = Date.UTC(2026, 10, 12); // ចាប់ផ្តើមបន្ទប់ពី 12/11/2026
 var ROOM_FS_KEY = 'roomFontSize';
-var roomFontSize = 16;
-try { var _rf = +localStorage.getItem(ROOM_FS_KEY); if (_rf >= 10 && _rf <= 32) roomFontSize = _rf; } catch (e) {}
+var roomFontSize = 22;
+try { var _rf = +localStorage.getItem(ROOM_FS_KEY);  } catch (e) {}
 var roomEditMode = false;
 function roomFs(delta) {
   roomFontSize = Math.max(10, Math.min(32, roomFontSize + delta));
