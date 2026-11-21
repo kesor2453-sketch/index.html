@@ -273,7 +273,7 @@
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
           <button type="button" class="today-btn admin-only" id="timeModeBtn" onclick="toggleTimeMode()" title="ចុច ⏰ រួចចុចលើឈ្មោះគ្រូពេទ្យ ដើម្បីដាក់ម៉ោងធ្វើការ">⏰</button>
           <span id="colTools" class="no-print"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
-          <span class="no-print" style="white-space:nowrap;"><button type="button" class="today-btn" id="rsAlpha" onclick="setRoomSort('alpha')" title="តម្រៀបតាមអក្សរ A-Z">A-Z</button> <button type="button" class="today-btn" id="rsRoom" onclick="setRoomSort('room')" title="តម្រៀបតាមបន្ទប់ 1 2 3">បន្ទប់១ បន្ទប់២ បន្ទប់៣</button></span>
+          <span class="no-print" style="white-space:nowrap;"><button type="button" class="today-btn admin-only" id="roomMonthBtn" onclick="toggleRoomsMonth()" title="បើក/បិទបន្ទប់ សម្រាប់ខែនេះ">🚪 ខែនេះ៖ មានបន្ទប់</button> <span id="roomSortCtl"><button type="button" class="today-btn" id="rsAlpha" onclick="setRoomSort('alpha')" title="តម្រៀបតាមអក្សរ A-Z">A-Z</button> <button type="button" class="today-btn" id="rsRoom" onclick="setRoomSort('room')" title="តម្រៀបតាមបន្ទប់ 1 2 3">បន្ទប់១ បន្ទប់២ បន្ទប់៣</button></span></span>
           <button type="button" class="today-btn no-print" id="imgBtn" onclick="downloadScheduleImage()" title="ទាញកាលវិភាគជារូបភាព (PNG) ដើម្បីផ្ញើ Telegram">🖼 រូបភាព</button>
           <button type="button" class="today-btn no-print admin-only" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
           <label class="today-btn no-print admin-only" style="cursor:pointer;" title="ដាក់ទិន្នន័យពីឯកសារ Sheet (.xlsx) ចូលវិញ">⬆ Restore<input type="file" accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importBackup(this)"></label>
@@ -452,6 +452,7 @@ var STATE = {
   columnsByMonth: {}, // { 'YYYY-MM': [ {id,label,type}, ... ] } — each month's actual column set
   columnsTemplate: null, // the "current standard" column set — seeds any month not yet visited
   doctorPhones: [], // [{id,name,phone}] — a single shared phone directory, not tied to any month
+  roomMonths: {}, // { 'YYYY-MM': true/false } — បើក/បិទបន្ទប់តាមខែ
   unlockedMonths: {}, // { 'YYYY-MM': true } — past months explicitly unlocked for schedule editing
   rates: RATES,
   khrPerUsd: KHR_PER_USD,
@@ -856,7 +857,7 @@ function persistRemoteState() {
   setDoc(scheduleDocRef, {
     doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columnsByMonth: STATE.columnsByMonth,
     columnsTemplate: STATE.columnsTemplate, doctorPhones: STATE.doctorPhones,
-    unlockedMonths: STATE.unlockedMonths
+    unlockedMonths: STATE.unlockedMonths, roomMonths: STATE.roomMonths
   }).catch(function (err) {
     showToast('⚠ មិនអាចផ្ញើទៅ Firestore បានទេ៖ ' + err.message);
   });
@@ -868,7 +869,7 @@ var firstSnapshotHandled = false;
 function currentBackupObject() {
   return { savedAt: new Date().toISOString(), doctors: STATE.doctors, scheduleAll: STATE.scheduleAll,
     columnsByMonth: STATE.columnsByMonth, columnsTemplate: STATE.columnsTemplate,
-    doctorPhones: STATE.doctorPhones, unlockedMonths: STATE.unlockedMonths };
+    doctorPhones: STATE.doctorPhones, unlockedMonths: STATE.unlockedMonths, roomMonths: STATE.roomMonths };
 }
 function saveLocalSafetyCopy() {
   try {
@@ -1180,7 +1181,7 @@ function importBackup(input) {
         STATE.doctors = d.doctors || []; STATE.scheduleAll = d.scheduleAll;
         STATE.columnsByMonth = d.columnsByMonth || {};
         STATE.columnsTemplate = d.columnsTemplate && d.columnsTemplate.length ? d.columnsTemplate : JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
-        STATE.doctorPhones = d.doctorPhones || []; STATE.unlockedMonths = d.unlockedMonths || {};
+        STATE.doctorPhones = d.doctorPhones || []; STATE.unlockedMonths = d.unlockedMonths || {}; STATE.roomMonths = d.roomMonths || {};
         dataLoaded = true;
         persistRemoteState(); renderSchedule(); renderDoctors();
         showToast('ដាក់ទិន្នន័យចូលវិញរួចរាល់ ✓');
@@ -1252,6 +1253,7 @@ document.addEventListener('DOMContentLoaded', function () {
         ? data.columnsTemplate : JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
       STATE.doctorPhones = data.doctorPhones || [];
       STATE.unlockedMonths = data.unlockedMonths || {};
+      STATE.roomMonths = data.roomMonths || {};
       var didMigrate = migrateOldDefaultLabels();
       var didReorder = enforceMiscLastAllMonths();
       enforceMiscLast(STATE.columnsTemplate);
@@ -1463,7 +1465,7 @@ function renderSchedule() {
       if (c.type === 'name') {
         while (idx + span < cols.length && cols[idx + span].type === 'name' && cols[idx + span].label === c.label) span++;
       }
-      if (roomSortMode === 'room' && c.type === 'name' && String(c.label).indexOf('ព្រឹក') !== -1) {
+      if (roomViewOn() && c.type === 'name' && String(c.label).indexOf('ព្រឹក') !== -1) {
         var ths = '';
         for (var q = 0; q < span; q++) {
           ths += '<th class="group-spv' + ((idx > 0 && q === 0) ? ' grp-start' : '') + '" style="padding:2px;">បន្ទប់' + kmNum(q + 1) + '</th>';
@@ -1524,7 +1526,7 @@ function renderSchedule() {
     // បន្ទប់៖ ស្វ័យប្រវត្តិ (ឆ្លាស់តាមថ្ងៃ) ឬ Admin កំណត់ដោយដៃ — ប្រើតែពេលបង្ហាញតាមបន្ទប់
     var slotInfo = {}; // colIndex → {field,value}
     var alphaRoom = {}; // colIndex → room (បង្ហាញជាស្លាកពេលតម្រៀប A-Z)
-    if (roomSortMode !== 'room') {
+    if (!roomViewOn()) {
       var gl = {};
       cols.forEach(function (c, ci) {
         if (c.type === 'name' && String(c.label).indexOf('ព្រឹក') !== -1) (gl[c.label] = gl[c.label] || []).push(ci);
@@ -1535,7 +1537,7 @@ function renderSchedule() {
         filled.forEach(function (ci) { alphaRoom[ci] = asg[cols[ci].id] || 0; });
       });
     }
-    if (roomSortMode === 'room') {
+    if (roomViewOn()) {
       var byLabel = {};
       cols.forEach(function (c, ci) {
         if (c.type === 'name' && String(c.label).indexOf('ព្រឹក') !== -1) (byLabel[c.label] = byLabel[c.label] || []).push(ci);
@@ -1568,6 +1570,7 @@ function renderSchedule() {
   document.getElementById('scheduleWrap').innerHTML = html;
 
   updateRoomSortButtons();
+  updateRoomMonthUi();
   bindCellClicks();
 }
 
@@ -1753,6 +1756,28 @@ function toggleRoomEdit() {
 window.toggleRoomEdit = toggleRoomEdit;
 var KM_NUM = ['០','១','២','៣','៤','៥','៦','៧','៨','៩'];
 function kmNum(n) { return String(n).split('').map(function (d) { return KM_NUM[+d]; }).join(''); }
+function roomsOn(ym) {
+  var v = STATE.roomMonths && STATE.roomMonths[ym];
+  if (v === true || v === false) return v;
+  return ym >= '2026-11'; // លំនាំដើម៖ មានបន្ទប់ពីខែ 11/2026 ឡើងទៅ
+}
+function roomViewOn() { return roomSortMode === 'room' && roomsOn(currentScheduleMonthKey()); }
+function toggleRoomsMonth() {
+  if (!requireOwner()) return;
+  var ym = currentScheduleMonthKey();
+  STATE.roomMonths = STATE.roomMonths || {};
+  STATE.roomMonths[ym] = !roomsOn(ym);
+  persistRemoteState(); scheduleBackup(); renderSchedule();
+  showToast(STATE.roomMonths[ym] ? '🚪 ខែនេះមានបន្ទប់ ✓' : '🚪 ខែនេះដកបន្ទប់ចេញ ✓');
+}
+window.toggleRoomsMonth = toggleRoomsMonth;
+function updateRoomMonthUi() {
+  var on = roomsOn(currentScheduleMonthKey());
+  var b = document.getElementById('roomMonthBtn');
+  if (b) { b.textContent = on ? '🚪 ខែនេះ៖ មានបន្ទប់' : '🚪 ខែនេះ៖ គ្មានបន្ទប់'; b.style.background = on ? '' : '#fde2e2'; }
+  var c = document.getElementById('roomSortCtl');
+  if (c) c.style.display = on ? '' : 'none';
+}
 var ROOM_SORT_KEY = 'roomSortMode';
 var roomSortMode = 'alpha'; // 'alpha' | 'room'
 try { if (localStorage.getItem(ROOM_SORT_KEY) === 'room') roomSortMode = 'room'; } catch (e) {}
@@ -1814,7 +1839,7 @@ function roomMapForDate(dateStr) {
 function assignRooms(dateStr, row, items) {
   items = items.slice().sort(function (x, y) { return compareDoctorNames(x.value, y.value); }); // តម្រៀប A-Z ជានិច្ច
   var res = {}, n = items.length, off = roomDayOffset(dateStr);
-  if (off < 0 || !n) return res;
+  if (off < 0 || !n || !roomsOn(dateStr.slice(0, 7))) return res;
   var taken = {};
   items.forEach(function (x) {
     var r = roomOverride(row, x.value);
@@ -1948,7 +1973,7 @@ function bindCellClicks() {
         openRoomDialog(cell.dataset.date, baseDoctorName(cell.dataset.value || ''));
         return;
       }
-      if (roomSortMode === 'room') { showToast('👁 ទិដ្ឋភាពបន្ទប់ — មើលតែប៉ុណ្ណោះ សូមប្តូរទៅ A-Z ដើម្បីកែ'); return; }
+      if (roomViewOn()) { showToast('👁 ទិដ្ឋភាពបន្ទប់ — មើលតែប៉ុណ្ណោះ សូមប្តូរទៅ A-Z ដើម្បីកែ'); return; }
       if (roomEditMode && !timeMode) {
         var rv = cell.dataset.value || '';
         if (!rv) { showToast('🚪 សូមចុចលើក្រឡាដែលមានឈ្មោះគ្រូពេទ្យ'); return; }
