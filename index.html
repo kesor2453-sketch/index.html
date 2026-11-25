@@ -1550,15 +1550,17 @@ function renderSchedule() {
         var rest = [];
         names.forEach(function (x) {
           var r = asg[x.field] || 0;
-          if (r && r <= out.length && !out[r - 1]) out[r - 1] = x; else rest.push(x);
+          if (r && r <= out.length) { if (!out[r - 1]) out[r - 1] = { field: x.field, value: x.value, multi: [x] }; else out[r - 1].multi.push(x); }
+          else rest.push(x);
         });
-        rest.forEach(function (x) { for (var q = 0; q < out.length; q++) if (!out[q]) { out[q] = x; break; } });
+        rest.forEach(function (x) { for (var q = 0; q < out.length; q++) if (!out[q]) { out[q] = { field: x.field, value: x.value, multi: [x] }; break; } });
         idxs.forEach(function (ci, q) { slotInfo[ci] = out[q] || { field: cols[ci].id, value: '' }; });
       });
     }
     cols.forEach(function (c, ci) {
       var cell;
       if (c.type === 'text') cell = renderOffCell(dateStr, c.id, row[c.id]);
+      else if (slotInfo[ci] && slotInfo[ci].multi && slotInfo[ci].multi.length > 1) cell = renderMultiCell(dateStr, slotInfo[ci].multi);
       else if (slotInfo[ci]) cell = renderSlotCell(dateStr, slotInfo[ci].field, slotInfo[ci].value);
       else cell = renderSlotCell(dateStr, c.id, row[c.id], alphaRoom[ci] || 0);
       if (isGroupStart(ci)) cell = cell.replace('<td>', '<td class="grp-start">');
@@ -1798,6 +1800,23 @@ function roomOverride(row, name) {
   if (!row || !row._room || !name) return 0;
   return row._room[baseDoctorName(name)] || 0;
 }
+// អានម៉ោងធ្វើការក្នុងឈ្មោះ ឧ. "Dr.A(8am-11am)", "Dr.B 1:00-7:00PM", "16pm-19pm" → {s,e} ម៉ោង (ទសភាគ) ឬ null
+function parseTimeRange(v) {
+  if (!v) return null;
+  var m = String(v).match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to|ដល់)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!m) return null;
+  var sh = +m[1], sm = +(m[2] || 0), sa = (m[3] || '').toLowerCase();
+  var eh = +m[4], em = +(m[5] || 0), ea = (m[6] || '').toLowerCase();
+  if (!sa) sa = ea; // "1:00-7:00PM" → ទាំងពីរ PM
+  function conv(h, suf) { if (h > 12) return h; if (suf === 'pm' && h < 12) return h + 12; if (suf === 'am' && h === 12) return 0; return h; }
+  if (sh > 24 || eh > 24 || sm > 59 || em > 59) return null;
+  var s = conv(sh, sa) + sm / 60, e = conv(eh, ea) + em / 60;
+  if (e <= s) e += 12;
+  if (e <= s) e += 12;
+  if (e - s > 24 || e - s <= 0) return null;
+  return { s: s, e: e };
+}
+function timeRangeHours(v) { var t = parseTimeRange(v); return t ? (t.e - t.s) : 0; }
 function roomPinOf(name) {
   var d = findDoctorByNameClient(baseDoctorName(name));
   return (d && d.roomPin) ? +d.roomPin : 0;
@@ -1815,7 +1834,6 @@ function morningItems(row, dateStr) {
   });
   return items;
 }
-// ចែកបន្ទប់ — មួយបន្ទប់មួយគ្រូពេទ្យ៖ ដោយដៃ (ថ្ងៃនោះ) → ជាប់រហូត (📌) → ឆ្លាស់តាមថ្ងៃលើបន្ទប់ដែលនៅសល់
 var ROOM_MEMO = {};
 function prevDateStr(dateStr) {
   var p = dateStr.split('-');
@@ -1835,36 +1853,56 @@ function roomMapForDate(dateStr) {
   ROOM_MEMO[dateStr] = out;
   return out;
 }
-// ចែកបន្ទប់ — មួយបន្ទប់មួយគ្រូពេទ្យ៖ ដោយដៃ (ថ្ងៃនោះ) → ជាប់រហូត (📌) → ឆ្លាស់លើបន្ទប់ដែលនៅសល់ (ជៀសបន្ទប់ដូចម្សិលមិញ)
+// គ្រូពេទ្យដែលមានម៉ោងមិនត្រួតគ្នា ចែករួមបន្ទប់តែមួយ; អ្នកគ្មានម៉ោងកាន់បន្ទប់មួយពេញ
+function roomUnits(items) { // items តម្រៀប A-Z រួច
+  var units = [];
+  items.forEach(function (x) { if (!parseTimeRange(x.value)) units.push([x]); });
+  var timed = items.filter(function (x) { return parseTimeRange(x.value); })
+    .sort(function (a, b) { return parseTimeRange(a.value).s - parseTimeRange(b.value).s; });
+  timed.forEach(function (x) {
+    var t = parseTimeRange(x.value), placed = false;
+    for (var k = 0; k < units.length && !placed; k++) {
+      var ok = units[k].every(function (y) { var u = parseTimeRange(y.value); return u && (t.s >= u.e || u.s >= t.e); });
+      if (ok) { units[k].push(x); placed = true; }
+    }
+    if (!placed) units.push([x]);
+  });
+  units.forEach(function (u) { u.sort(function (a, b) { return items.indexOf(a) - items.indexOf(b); }); });
+  units.sort(function (a, b) { return items.indexOf(a[0]) - items.indexOf(b[0]); });
+  return units;
+}
+// ចែកបន្ទប់ — មួយបន្ទប់មួយគ្រូពេទ្យ (ឬក្រុមម៉ោងមិនត្រួតគ្នា)៖ ដោយដៃ (ថ្ងៃនោះ) → ជាប់រហូត (📌) → ឆ្លាស់លើបន្ទប់ដែលនៅសល់ (ជៀសបន្ទប់ដូចម្សិលមិញ)
 function assignRooms(dateStr, row, items) {
   items = items.slice().sort(function (x, y) { return compareDoctorNames(x.value, y.value); }); // តម្រៀប A-Z ជានិច្ច
-  var res = {}, n = items.length, off = roomDayOffset(dateStr);
-  if (off < 0 || !n || !roomsOn(dateStr.slice(0, 7))) return res;
-  var taken = {};
-  items.forEach(function (x) {
-    var r = roomOverride(row, x.value);
-    if (r && r <= n && !taken[r]) { taken[r] = 1; res[x.field] = r; }
+  var res = {}, off = roomDayOffset(dateStr);
+  if (off < 0 || !items.length || !roomsOn(dateStr.slice(0, 7))) return res;
+  var units = roomUnits(items), n = units.length;
+  var urooms = new Array(n), taken = {};
+  units.forEach(function (u, i) {
+    for (var q = 0; q < u.length; q++) { var r = roomOverride(row, u[q].value); if (r && r <= n && !taken[r]) { taken[r] = 1; urooms[i] = r; break; } }
   });
-  items.forEach(function (x) {
-    if (res[x.field]) return;
-    var r = roomPinOf(x.value);
-    if (r && r <= n && !taken[r]) { taken[r] = 1; res[x.field] = r; }
+  units.forEach(function (u, i) {
+    if (urooms[i]) return;
+    for (var q = 0; q < u.length; q++) { var r = roomPinOf(u[q].value); if (r && r <= n && !taken[r]) { taken[r] = 1; urooms[i] = r; break; } }
   });
   var free = [];
   for (var r2 = 1; r2 <= n; r2++) if (!taken[r2]) free.push(r2);
-  var rest = items.filter(function (x) { return !res[x.field]; });
+  var rest = []; units.forEach(function (u, i) { if (!urooms[i]) rest.push(i); });
   var L = free.length;
-  if (!L) return res;
-  var prev = (off > 0 && off < 400) ? roomMapForDate(prevDateStr(dateStr)) : {};
-  var pick = off % L;
-  for (var k = 0; k < L; k++) {
-    var kk = (off + k) % L, ok = true;
-    for (var q = 0; q < rest.length; q++) {
-      if (prev[baseDoctorName(rest[q].value)] === free[(q + kk) % L]) { ok = false; break; }
+  if (L) {
+    var prev = (off > 0 && off < 400) ? roomMapForDate(prevDateStr(dateStr)) : {};
+    var pick = off % L;
+    for (var k = 0; k < L; k++) {
+      var kk = (off + k) % L, ok = true;
+      for (var z = 0; z < rest.length && ok; z++) {
+        var room = free[(z + kk) % L];
+        units[rest[z]].forEach(function (m) { if (prev[baseDoctorName(m.value)] === room) ok = false; });
+      }
+      if (ok) { pick = kk; break; }
     }
-    if (ok) { pick = kk; break; }
+    rest.forEach(function (ui, z) { urooms[ui] = free[(z + pick) % L]; });
   }
-  rest.forEach(function (x, q) { res[x.field] = free[(q + pick) % L]; });
+  units.forEach(function (u, i) { u.forEach(function (m) { res[m.field] = urooms[i]; }); });
   return res;
 }
 function openRoomDialog(date, name) {
@@ -1875,12 +1913,13 @@ function openRoomDialog(date, name) {
   if (!me) return;
   var cur = assignRooms(date, row, items);
   if (!cur[me.field]) { showToast('🚪 មិនទាន់ចាប់ផ្តើមចែកបន្ទប់ (ចាប់ពី 12/11/2026)'); return; }
-  var n = items.length, pin = roomPinOf(me.value);
+  var n = 0; items.forEach(function (x) { if (cur[x.field] > n) n = cur[x.field]; });
+  var pin = roomPinOf(me.value);
   var rowsHtml = '';
   for (var r = 1; r <= n; r++) {
-    var who = items.filter(function (x) { return cur[x.field] === r; })[0];
+    var whoList = items.filter(function (x) { return cur[x.field] === r && x !== me; });
     rowsHtml += '<div style="display:flex;gap:6px;margin-bottom:8px;">' +
-      '<button type="button" data-a="day" data-r="' + r + '" style="' + CM_BTN + 'margin-bottom:0;flex:1;' + (cur[me.field] === r ? 'border-color:#2f6fed;background:#e6eefc;' : '') + '">🚪 បន្ទប់ ' + kmNum(r) + (who && who !== me ? ' <small style="color:#6b7686;">(' + escapeHtml(baseDoctorName(who.value)) + ')</small>' : '') + '</button>' +
+      '<button type="button" data-a="day" data-r="' + r + '" style="' + CM_BTN + 'margin-bottom:0;flex:1;' + (cur[me.field] === r ? 'border-color:#2f6fed;background:#e6eefc;' : '') + '">🚪 បន្ទប់ ' + kmNum(r) + (whoList.length ? ' <small style="color:#6b7686;">(' + whoList.map(function (w) { return escapeHtml(baseDoctorName(w.value)); }).join(', ') + ')</small>' : '') + '</button>' +
       '<button type="button" data-a="pin" data-r="' + r + '" style="' + CM_BTN + 'margin-bottom:0;width:auto;' + (pin === r ? 'border-color:#2f6fed;background:#e6eefc;' : '') + '" title="ជាប់បន្ទប់នេះរហូត មិនដូរ">📌</button></div>';
   }
   var extra = (pin ? '<button type="button" data-a="unpin" style="' + CM_BTN + '">📌✕ ដោះការជាប់បន្ទប់ ' + kmNum(pin) + '</button>' : '') +
@@ -1903,11 +1942,12 @@ function openRoomDialog(date, name) {
         dd2.roomPin = r;
         delete row._room; // ឲ្យការជាប់មានអានុភាពភ្លាម
       } else {
-        var other = items.filter(function (x) { return x !== me && cur[x.field] === r; })[0];
-        if (other && roomPinOf(other.value) === r) { showToast('⚠ បន្ទប់ ' + kmNum(r) + ' ជាប់ ' + baseDoctorName(other.value) + ' រហូត'); return; }
-        var map = {}; items.forEach(function (x) { map[x.field] = cur[x.field]; });
-        if (other) map[other.field] = cur[me.field];
-        map[me.field] = r;
+        var others = items.filter(function (x) { return x !== me && cur[x.field] === r && cur[x.field] !== cur[me.field]; });
+        var pinned = others.filter(function (x) { return roomPinOf(x.value) === r; })[0];
+        if (pinned) { showToast('⚠ បន្ទប់ ' + kmNum(r) + ' ជាប់ ' + baseDoctorName(pinned.value) + ' រហូត'); return; }
+        var myRoom = cur[me.field];
+        var map = {};
+        items.forEach(function (x) { map[x.field] = cur[x.field] === myRoom ? r : (cur[x.field] === r ? myRoom : cur[x.field]); });
         row._room = {};
         items.forEach(function (x) { row._room[baseDoctorName(x.value)] = map[x.field]; });
       }
@@ -1935,6 +1975,13 @@ function renderSlotCell(dateStr, field, value, room) {
   return '<td><div class="cell-slot ' + (value ? 'spv' : 'empty') +
     '"' + style + ' data-date="' + dateStr + '" data-field="' + field + '" data-value="' + escapeAttr(value || '') + '">' +
     display + '</div></td>';
+}
+
+function renderMultiCell(dateStr, members) {
+  var inner = members.map(function (m) {
+    return '<div style="' + styleFor(m.value) + 'border-radius:6px;padding:2px 6px;margin:1px 0;">' + escapeHtml(m.value) + '</div>';
+  }).join('');
+  return '<td><div class="cell-slot spv" style="background:transparent;box-shadow:none;padding:0;" data-date="' + dateStr + '" data-field="' + members[0].field + '" data-value="">' + inner + '</div></td>';
 }
 
 function renderOffCell(dateStr, field, value) {
@@ -2868,7 +2915,8 @@ function computePayrollClient(year, month) {
       var key = doc ? doc.ID : normName(name);
       var displayName = doc ? doc.NameSPV : name;
       if (!spvCounts[key]) spvCounts[key] = { name: displayName, dayShifts: 0, nightShifts: 0, shifts: 0, dates: {} };
-      var dd = spvCounts[key].dates[r.Date] || (spvCounts[key].dates[r.Date] = { d: false, n: false });
+      var dd = spvCounts[key].dates[r.Date] || (spvCounts[key].dates[r.Date] = { d: false, n: false, dh: 0, nh: 0, du: false, nu: false });
+      var th = timeRangeHours(rawName); // ម៉ោងបញ្ជាក់ក្នុងឈ្មោះ (បើគ្មាន = 12ម៉ោង)
       // Classify purely by whether the column's current header TEXT contains
       // "យប់" (night) or "ព្រឹក" (morning) — never by the column's id/number.
       // So any number of columns sharing that same header word (e.g. two
@@ -2877,9 +2925,9 @@ function computePayrollClient(year, month) {
       // "column #2" etc. Renaming a header reclassifies it automatically.
       var isNight = col.label.indexOf('យប់') !== -1;
       var isMorning = col.label.indexOf('ព្រឹក') !== -1;
-      if (isNight) { spvCounts[key].nightShifts++; dd.n = true; }
-      else if (isMorning) { spvCounts[key].dayShifts++; dd.d = true; }
-      else { spvCounts[key].dayShifts++; dd.d = true; } // fallback: anything not explicitly "យប់" counts as day
+      if (isNight) { spvCounts[key].nightShifts++; dd.n = true; if (th) dd.nh += th; else dd.nu = true; }
+      else if (isMorning) { spvCounts[key].dayShifts++; dd.d = true; if (th) dd.dh += th; else dd.du = true; }
+      else { spvCounts[key].dayShifts++; dd.d = true; if (th) dd.dh += th; else dd.du = true; } // fallback: anything not explicitly "យប់" counts as day
       spvCounts[key].shifts++;
     });
   });
@@ -2889,9 +2937,11 @@ function computePayrollClient(year, month) {
   var list = Object.keys(spvCounts).map(function (k) {
     var c = spvCounts[k], full = 0, dayOnly = 0, nightOnly = 0;
     var doneShifts = 0, doneDays = 0, remShifts = 0, remDays = 0;
-    var remain = 0; // ម៉ោងនៅសល់ — វេនក្រោយថ្ងៃនេះ (ថ្ងៃនេះរាប់ថាបានធ្វើ)
+    var totalH = 0, remain = 0; // ម៉ោងនៅសល់ — វេនក្រោយថ្ងៃនេះ (ថ្ងៃនេះរាប់ថាបានធ្វើ)
     Object.keys(c.dates).forEach(function (dt) {
-      var x = c.dates[dt], h = (x.d && x.n) ? 24 : ((x.d || x.n) ? 12 : 0);
+      var x = c.dates[dt];
+      var dH = x.d ? Math.min(12, x.dh + (x.du ? 12 : 0)) : 0, nH = x.n ? Math.min(12, x.nh + (x.nu ? 12 : 0)) : 0;
+      var h = dH + nH; totalH += h;
       if (x.d && x.n) full++; else if (x.d) dayOnly++; else if (x.n) nightOnly++;
       var sh = (x.d ? 1 : 0) + (x.n ? 1 : 0);
       if (dt > todayIso) { remain += h; remShifts += sh; remDays++; } else { doneShifts += sh; doneDays++; }
@@ -2900,7 +2950,7 @@ function computePayrollClient(year, month) {
     c.daysInMonth = dim;
     c.workDays = full + dayOnly + nightOnly;
     c.full24 = full; c.dayOnly = dayOnly; c.nightOnly = nightOnly;
-    c.hours = full * 24 + (dayOnly + nightOnly) * 12;
+    c.hours = totalH;
     c.totalHours = dim * 24;
     c.pct = Math.round(c.hours / c.totalHours * 100);
     c.offDays = dim - c.workDays;
