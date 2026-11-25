@@ -273,6 +273,7 @@
           <button type="button" class="today-btn" id="printScheduleBtn" onclick="printSchedule()">🖨️ ព្រីនកាលវិភាគ</button>
           <button type="button" class="today-btn admin-only" id="timeModeBtn" onclick="toggleTimeMode()" title="ចុច ⏰ រួចចុចលើឈ្មោះគ្រូពេទ្យ ដើម្បីដាក់ម៉ោងធ្វើការ">⏰</button>
           <span id="colTools" class="no-print"><button type="button" class="today-btn" onclick="addColumn()" title="បន្ថែមជួរឈរ">+</button> <button type="button" class="today-btn" onclick="toggleHeaderEditMode()" title="កែ/បញ្ចប់កែឈ្មោះជួរឈរ">✎</button></span>
+          <button type="button" class="today-btn no-print" id="bulkAddBtn" onclick="openBulkAdd()" title="ថែមគ្រូពេទ្យ រាល់ថ្ងៃ / សៅរ៍-អាទិត្យ / ថ្ងៃដែលរើស">➕ ថែមគ្រូពេទ្យ</button>
           <span class="no-print" style="white-space:nowrap;"><button type="button" class="today-btn admin-only" id="roomMonthBtn" onclick="toggleRoomsMonth()" title="បើក/បិទបន្ទប់ សម្រាប់ខែនេះ">🚪 ខែនេះ៖ មានបន្ទប់</button> <span id="roomSortCtl"><button type="button" class="today-btn" id="rsAlpha" onclick="setRoomSort('alpha')" title="តម្រៀបតាមអក្សរ A-Z">A-Z</button> <button type="button" class="today-btn" id="rsRoom" onclick="setRoomSort('room')" title="តម្រៀបតាមបន្ទប់ 1 2 3">បន្ទប់១ បន្ទប់២ បន្ទប់៣</button></span></span>
           <button type="button" class="today-btn no-print" id="imgBtn" onclick="downloadScheduleImage()" title="ទាញកាលវិភាគជារូបភាព (PNG) ដើម្បីផ្ញើ Telegram">🖼 រូបភាព</button>
           <button type="button" class="today-btn no-print admin-only" onclick="exportBackup()" title="ទាញកាលវិភាគជា Sheet (.xlsx) — បើកក្នុង Google Sheets បាន">⬇ Backup</button>
@@ -452,6 +453,7 @@ var STATE = {
   columnsByMonth: {}, // { 'YYYY-MM': [ {id,label,type}, ... ] } — each month's actual column set
   columnsTemplate: null, // the "current standard" column set — seeds any month not yet visited
   doctorPhones: [], // [{id,name,phone}] — a single shared phone directory, not tied to any month
+  addRules: [], // ក្បួនថែមគ្រូពេទ្យ (ចងចាំសម្រាប់ខែបន្ទាប់)
   roomMonths: {}, // { 'YYYY-MM': true/false } — បើក/បិទបន្ទប់តាមខែ
   unlockedMonths: {}, // { 'YYYY-MM': true } — past months explicitly unlocked for schedule editing
   rates: RATES,
@@ -857,7 +859,7 @@ function persistRemoteState() {
   setDoc(scheduleDocRef, {
     doctors: STATE.doctors, scheduleAll: STATE.scheduleAll, columnsByMonth: STATE.columnsByMonth,
     columnsTemplate: STATE.columnsTemplate, doctorPhones: STATE.doctorPhones,
-    unlockedMonths: STATE.unlockedMonths, roomMonths: STATE.roomMonths
+    unlockedMonths: STATE.unlockedMonths, roomMonths: STATE.roomMonths, addRules: STATE.addRules
   }).catch(function (err) {
     showToast('⚠ មិនអាចផ្ញើទៅ Firestore បានទេ៖ ' + err.message);
   });
@@ -869,7 +871,7 @@ var firstSnapshotHandled = false;
 function currentBackupObject() {
   return { savedAt: new Date().toISOString(), doctors: STATE.doctors, scheduleAll: STATE.scheduleAll,
     columnsByMonth: STATE.columnsByMonth, columnsTemplate: STATE.columnsTemplate,
-    doctorPhones: STATE.doctorPhones, unlockedMonths: STATE.unlockedMonths, roomMonths: STATE.roomMonths };
+    doctorPhones: STATE.doctorPhones, unlockedMonths: STATE.unlockedMonths, roomMonths: STATE.roomMonths, addRules: STATE.addRules };
 }
 function saveLocalSafetyCopy() {
   try {
@@ -1181,7 +1183,7 @@ function importBackup(input) {
         STATE.doctors = d.doctors || []; STATE.scheduleAll = d.scheduleAll;
         STATE.columnsByMonth = d.columnsByMonth || {};
         STATE.columnsTemplate = d.columnsTemplate && d.columnsTemplate.length ? d.columnsTemplate : JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
-        STATE.doctorPhones = d.doctorPhones || []; STATE.unlockedMonths = d.unlockedMonths || {}; STATE.roomMonths = d.roomMonths || {};
+        STATE.doctorPhones = d.doctorPhones || []; STATE.unlockedMonths = d.unlockedMonths || {}; STATE.roomMonths = d.roomMonths || {}; STATE.addRules = d.addRules || [];
         dataLoaded = true;
         persistRemoteState(); renderSchedule(); renderDoctors();
         showToast('ដាក់ទិន្នន័យចូលវិញរួចរាល់ ✓');
@@ -1254,6 +1256,7 @@ document.addEventListener('DOMContentLoaded', function () {
       STATE.doctorPhones = data.doctorPhones || [];
       STATE.unlockedMonths = data.unlockedMonths || {};
       STATE.roomMonths = data.roomMonths || {};
+      STATE.addRules = data.addRules || [];
       var didMigrate = migrateOldDefaultLabels();
       var didReorder = enforceMiscLastAllMonths();
       enforceMiscLast(STATE.columnsTemplate);
@@ -1441,6 +1444,7 @@ var dragColId = null;
 
 function renderSchedule() {
   ROOM_MEMO = {};
+  try { applyAddRulesToCurrentMonth(); } catch (e) {}
   try { renderEditOpenButton(); } catch (e) {}
   var y = STATE.year, m = STATE.month;
   var nDays = daysInMonth(y, m);
@@ -1801,7 +1805,10 @@ function roomOverride(row, name) {
   return row._room[baseDoctorName(name)] || 0;
 }
 // អានម៉ោងធ្វើការក្នុងឈ្មោះ ឧ. "Dr.A(8am-11am)", "Dr.B 1:00-7:00PM", "16pm-19pm" → {s,e} ម៉ោង (ទសភាគ) ឬ null
-function parseTimeRange(v) {
+function cellSegments(v) { // "Dr.A(16pm-19pm) + Dr.B(19pm-22pm)" → ["Dr.A(16pm-19pm)", "Dr.B(19pm-22pm)"]
+  return String(v || '').split('+').map(function (x) { return x.trim(); }).filter(Boolean);
+}
+function parseTimeRange1(v) {
   if (!v) return null;
   var m = String(v).match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to|ដល់)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (!m) return null;
@@ -1816,7 +1823,17 @@ function parseTimeRange(v) {
   if (e - s > 24 || e - s <= 0) return null;
   return { s: s, e: e };
 }
-function timeRangeHours(v) { var t = parseTimeRange(v); return t ? (t.e - t.s) : 0; }
+// ប្រអប់មួយអាចមានគ្រូពេទ្យច្រើនតគ្នា (ភ្ជាប់ដោយ +) — ត្រឡប់ចន្លោះម៉ោងសរុបពីដើមដល់ចុង; បើមានគ្រូពេទ្យគ្មានម៉ោង = null
+function parseTimeRange(v) {
+  var segs = cellSegments(v), s = null, e = null;
+  for (var i = 0; i < segs.length; i++) {
+    var t = parseTimeRange1(segs[i]);
+    if (!t) return null;
+    s = s === null ? t.s : Math.min(s, t.s); e = e === null ? t.e : Math.max(e, t.e);
+  }
+  return s === null ? null : { s: s, e: e };
+}
+function timeRangeHours(v) { var t = parseTimeRange1(v); return t ? (t.e - t.s) : 0; }
 function roomPinOf(name) {
   var d = findDoctorByNameClient(baseDoctorName(name));
   return (d && d.roomPin) ? +d.roomPin : 0;
@@ -1970,6 +1987,13 @@ function roomBadge(room, pinned) {
   return '<span class="room-badge" title="ចុចដើម្បីដូរបន្ទប់" style="cursor:pointer;display:inline-block;flex:none;margin-left:6px;padding:1px 9px;min-width:3.4em;text-align:center;border-radius:10px;font-size:0.95em;font-weight:700;line-height:1.4;background:rgba(255,255,255,.75);color:#1c2430;border:1px solid rgba(0,0,0,.18);white-space:nowrap;">' + 'បន្ទប់ ' + kmNum(room) + '</span>';
 }
 function renderSlotCell(dateStr, field, value, room) {
+  var segs = cellSegments(value);
+  if (segs.length > 1) {
+    var pills = segs.map(function (sg) {
+      return '<div style="' + styleFor(sg) + 'border-radius:6px;padding:2px 6px;margin:1px 0;text-align:center;">' + escapeHtml(sg) + '</div>';
+    }).join('');
+    return '<td><div class="cell-slot spv" style="background:transparent;box-shadow:none;padding:0;display:flex;align-items:center;justify-content:space-between;" data-date="' + dateStr + '" data-field="' + field + '" data-value="' + escapeAttr(value) + '"><div style="flex:1;min-width:0;">' + pills + '</div>' + (room ? roomBadge(room, false) : '') + '</div></td>';
+  }
   var display = value ? (room ? '<span style="flex:1;text-align:center;">' + escapeHtml(value) + '</span>' + roomBadge(room, false) : escapeHtml(value)) : '—';
   var style = value ? ' style="' + styleFor(value) + (room ? 'display:flex;align-items:center;justify-content:space-between;' : '') + '"' : '';
   return '<td><div class="cell-slot ' + (value ? 'spv' : 'empty') +
@@ -1978,8 +2002,8 @@ function renderSlotCell(dateStr, field, value, room) {
 }
 
 function renderMultiCell(dateStr, members) {
-  var inner = members.map(function (m) {
-    return '<div style="' + styleFor(m.value) + 'border-radius:6px;padding:2px 6px;margin:1px 0;">' + escapeHtml(m.value) + '</div>';
+  var inner = members.reduce(function (a, m) { return a.concat(cellSegments(m.value)); }, []).map(function (sg) {
+    return '<div style="' + styleFor(sg) + 'border-radius:6px;padding:2px 6px;margin:1px 0;">' + escapeHtml(sg) + '</div>';
   }).join('');
   return '<td><div class="cell-slot spv" style="background:transparent;box-shadow:none;padding:0;" data-date="' + dateStr + '" data-field="' + members[0].field + '" data-value="">' + inner + '</div></td>';
 }
@@ -2554,24 +2578,62 @@ function openEditor(cell) {
   nameInput.className = 'edit-select';
   nameInput.setAttribute('list', listId);
   nameInput.value = currentVal || '';
-  nameInput.placeholder = 'វាយបញ្ចូលឈ្មោះ...';
+  nameInput.placeholder = 'វាយឈ្មោះ... (ដាក់ + បន្ថែមគ្រូពេទ្យបន្ត)';
 
   cell.innerHTML = '';
   cell.style.display = 'flex';
   cell.style.alignItems = 'center';
   cell.appendChild(nameInput);
   cell.appendChild(datalist);
+  var addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.textContent = '➕'; addBtn.title = 'បន្ថែមគ្រូពេទ្យបន្តក្នុងប្រអប់នេះ';
+  addBtn.style.cssText = 'flex:none;margin-left:4px;padding:2px 8px;font-size:16px;border:1px solid #c9d3e2;border-radius:8px;background:#fff;cursor:pointer;';
+  addBtn.addEventListener('mousedown', function (e) { e.preventDefault(); });
+  cell.appendChild(addBtn);
   nameInput.focus();
   nameInput.select();
 
+  // ➕ បន្ថែមគ្រូពេទ្យបន្ត (ក្នុងប្រអប់តែមួយ) — រើសឈ្មោះ រួចរើសម៉ោង
+  addBtn.addEventListener('click', function () {
+    var cur = nameInput.value.trim();
+    var first = cur ? resolveFn(cur) : null;
+    if (!first) { showToast('⚠ សូមដាក់ឈ្មោះគ្រូពេទ្យទីមួយ (ត្រឹមត្រូវ) មុន'); nameInput.focus(); return; }
+    var used = cellSegments(first).map(function (x) { return baseDoctorName(x); });
+    var avail = suggestions.filter(function (x) { return used.indexOf(x) === -1; });
+    nameInput.dataset.asking = '1';
+    var ov = cellMenuShell('➕ គ្រូពេទ្យបន្ត<div style="font-weight:500;font-size:12.5px;color:#6b7686;">' + escapeHtml(first) + ' + …</div>',
+      '<div style="max-height:46vh;overflow:auto;">' + avail.map(function (x, i) { return '<button type="button" data-i="' + i + '" style="' + CM_BTN + '">' + escapeHtml(x) + '</button>'; }).join('') + '</div>' +
+      '<button type="button" data-i="x" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>');
+    function cancel() { delete nameInput.dataset.asking; nameInput.focus(); }
+    ov.addEventListener('mousedown', function (e) { if (e.target === ov) { closeCellMenu(); cancel(); } });
+    ov.querySelectorAll('button').forEach(function (bt) {
+      bt.addEventListener('click', function () {
+        closeCellMenu();
+        if (bt.dataset.i === 'x') { cancel(); return; }
+        var picked = avail[+bt.dataset.i];
+        showTimeDialog(picked, function (v) {
+          delete nameInput.dataset.asking;
+          if (v !== null) nameInput.value = first + ' + ' + v;
+          nameInput.focus();
+        }, date.split('-').reverse().join('/'));
+      });
+    });
+  });
+
   // លោតស្វ័យប្រវត្តិ៖ ពេលជ្រើសឈ្មោះពីបញ្ជីណែនាំ ឬវាយឈ្មោះគ្រូពេទ្យត្រូវនឹងបញ្ជីពេញលេញ
-  var resolveFn = function (typed) {
+  var resolveOne = function (typed) {
     var sp = splitTyped(typed, suggestions);
     if (!sp) return bestDoctorMatch(typed, suggestions);
     if (!sp.rest) return sp.name;
     var rest = sp.rest;
     if (rest.charAt(0) === '(') return sp.name + rest + (rest.charAt(rest.length - 1) === ')' ? '' : ')');
     return sp.name + ' ' + rest;
+  };
+  var resolveFn = function (typed) { // គ្រូពេទ្យច្រើនក្នុងប្រអប់តែមួយ ភ្ជាប់ដោយ +
+    if (typed.indexOf('+') === -1) return resolveOne(typed);
+    var segs = cellSegments(typed), outp = [];
+    for (var q = 0; q < segs.length; q++) { var r1 = resolveOne(segs[q]); if (!r1) return null; outp.push(r1); }
+    return outp.join(' + ');
   };
 
   var finishFn = wireEditorInput(nameInput, cell, date, field, currentVal, function (e) {
@@ -2582,14 +2644,142 @@ function openEditor(cell) {
       !suggestions.some(function (x) { return x !== v && x.indexOf(v) === 0; });
     // បំពេញអក្សរបន្តស្វ័យប្រវត្តិ (ghost) ពេលវាយនៅដើមឈ្មោះ
     if (e.inputType && e.inputType.indexOf('insertText') === 0 && nameInput.selectionStart === v.length) {
-      var low = nameInput.value.toLowerCase();
-      var comp = suggestions.filter(function (x) { return x.toLowerCase().indexOf(low) === 0 && x.length > low.length; })[0];
-      if (comp) { nameInput.value = comp; nameInput.setSelectionRange(low.length, comp.length); }
+      var whole = nameInput.value, pi = whole.lastIndexOf('+');
+      var head = pi === -1 ? '' : whole.slice(0, pi + 1) + ' ';
+      var tail = pi === -1 ? whole : whole.slice(pi + 1).replace(/^\s+/, '');
+      var low = tail.toLowerCase();
+      var comp = low ? suggestions.filter(function (x) { return x.toLowerCase().indexOf(low) === 0 && x.length > low.length; })[0] : null;
+      if (comp) { nameInput.value = head + comp; nameInput.setSelectionRange(head.length + low.length, head.length + comp.length); }
     }
     return fromList; // ជ្រើសពីបញ្ជីណែនាំ = Enter; បើវាយខ្លួនឯង ត្រូវចុច Enter (អាចវាយអក្សរបន្ថែមបាន)
-  }, resolveFn, function (resolved) { return needsTime(resolved) && isKaSeyla(resolved); });
+  }, resolveFn, function (resolved) { return resolved.indexOf('+') === -1 && needsTime(resolved) && isKaSeyla(resolved); });
 
 }
+
+// ➕ ថែមគ្រូពេទ្យតាមក្បួន៖ រាល់ថ្ងៃ / សៅរ៍-អាទិត្យ / ថ្ងៃក្នុងសប្តាហ៍ដែលរើស — ចងចាំ ហើយដាក់ឲខែបន្ទាប់ៗដោយស្វ័យប្រវត្តិ
+var WD_LABELS = [['ច', 1], ['អ', 2], ['ព', 3], ['ព្រ', 4], ['សុ', 5], ['ស', 6], ['អា', 0]];
+function wdText(wd) {
+  var set = {}; (wd || []).forEach(function (x) { set[x] = true; });
+  if (Object.keys(set).length === 7) return 'រាល់ថ្ងៃ';
+  if (Object.keys(set).length === 2 && set[0] && set[6]) return 'សៅរ៍-អាទិត្យ';
+  return WD_LABELS.filter(function (p) { return set[p[1]]; }).map(function (p) { return p[0]; }).join(' ');
+}
+// ដាក់គ្រូពេទ្យលើថ្ងៃនៃខែមួយ (មិន render) — ត្រឡប់ស្ថិតិ
+function addDoctorToMonth(name, time, wd, ym) {
+  var p = ym.split('-'), y = +p[0], m = +p[1], dim = daysInMonth(y, m);
+  var cols = getColumnsForMonth(ym).filter(function (c) { return c.type === 'name' && String(c.label).indexOf('ព្រឹក') !== -1; });
+  var res = { added: 0, full: [], has: 0 };
+  if (!cols.length) return res;
+  var value = name + (time ? '(' + time + ')' : ''), nowIso = new Date().toISOString();
+  for (var d = 1; d <= dim; d++) {
+    if (wd.indexOf(new Date(Date.UTC(y, m - 1, d)).getUTCDay()) === -1) continue;
+    var date = ym + '-' + pad2(d);
+    var row = rowForDate(date);
+    if (!row) { row = { Date: date }; STATE.scheduleAll.push(row); }
+    var has = cols.some(function (c) { return cellSegments(row[c.id]).some(function (sg) { return baseDoctorName(sg) === name; }); });
+    if (has) { res.has++; continue; }
+    var free = cols.filter(function (c) { return !row[c.id]; })[0];
+    if (!free) { res.full.push(d); continue; }
+    row[free.id] = value;
+    sortRowGroup(row, ym, free.id);
+    if (!isPastMonthKey(ym)) {
+      row._log = row._log || {};
+      row._log[free.id] = row._log[free.id] || [];
+      row._log[free.id].push({ at: nowIso, value: value, oldValue: '', device: getDeviceName() });
+    }
+    res.added++;
+  }
+  return res;
+}
+// ខែថ្មីដែលអ្នកមានសិទ្ធិកែបើក → ដាក់ក្បួនដែលបានចងចាំ (ម្តងក្នុងមួយខែ)
+function applyAddRulesToCurrentMonth() {
+  var ym = currentScheduleMonthKey();
+  var rules = STATE.addRules || [];
+  if (!rules.length || !dataLoaded || !canEditMonth(ym) || scheduleMonthLocked() || isPastMonthKey(ym)) return false;
+  var changed = false;
+  rules.forEach(function (r) {
+    r.applied = r.applied || {};
+    if (r.applied[ym] || ym < r.start) return;
+    r.applied[ym] = true; changed = true;
+    addDoctorToMonth(r.doctor, r.time, r.wd, ym);
+  });
+  if (changed) { purgeFutureLogs(); persistRemoteState(); scheduleBackup(); }
+  return changed;
+}
+function openBulkAdd() {
+  if (!requireEdit()) return;
+  var ym = currentScheduleMonthKey();
+  if (scheduleMonthLocked()) { showToast('🔒 ខែនេះត្រូវបានចាក់សោ'); return; }
+  var docs = STATE.doctors.map(function (d) { return d.NameSPV; }).filter(Boolean).sort(compareDoctorNames);
+  if (!docs.length) { showToast('មិនមានគ្រូពេទ្យក្នុងបញ្ជីទេ'); return; }
+  var wd = [0, 1, 2, 3, 4, 5, 6];
+  var SEL = 'border-color:#2f6fed;background:#e6eefc;';
+  var rulesHtml = (STATE.addRules || []).map(function (r) {
+    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;"><div style="flex:1;font-size:13px;border:1px solid #d6dbe6;background:#f7f9fd;border-radius:10px;padding:8px 10px;">➕ <b>' + escapeHtml(r.doctor) + '</b>' + (r.time ? ' (' + escapeHtml(r.time) + ')' : '') + ' · ' + wdText(r.wd) + '</div>' +
+      '<button type="button" data-del="' + r.id + '" style="border:1px solid #e3b4b4;background:#fdeeee;border-radius:10px;padding:8px 10px;font-size:14px;cursor:pointer;" title="លុបក្បួន (ប្រអប់ដែលដាក់រួចនៅដដែល)">✕</button></div>';
+  }).join('');
+  var wdHtml = WD_LABELS.map(function (p) {
+    return '<button type="button" data-w="' + p[1] + '" style="flex:1;margin:0 2px;padding:9px 0;border:1px solid #2f6fed;background:#e6eefc;border-radius:8px;font-family:inherit;font-size:14px;cursor:pointer;">' + p[0] + '</button>';
+  }).join('');
+  var ov = cellMenuShell('➕ ថែមគ្រូពេទ្យតាមក្បួន',
+    (rulesHtml ? '<div style="font-size:12px;color:#6b7686;margin-bottom:4px;">ក្បួនដែលចងចាំ (ដាក់ឲខែថ្មីៗដោយស្វ័យប្រវត្តិ)៖</div>' + rulesHtml + '<hr style="border:none;border-top:1px solid #e3e7ef;margin:10px 0;">' : '') +
+    '<select id="baDoc" style="' + CM_INP + '">' + docs.map(function (x) { return '<option>' + escapeHtml(x) + '</option>'; }).join('') + '</select>' +
+    '<input id="baTime" type="text" placeholder="ម៉ោង (ឧ. 8am-11am) — ទទេ = គ្មានម៉ោង" style="' + CM_INP + 'margin-bottom:6px;">' +
+    '<div style="display:flex;gap:6px;margin-bottom:10px;"><button type="button" data-p="8am-11am" style="' + CM_BTN + 'margin:0;text-align:center;padding:8px;">8am-11am</button><button type="button" data-p="16pm-19pm" style="' + CM_BTN + 'margin:0;text-align:center;padding:8px;">16pm-19pm</button></div>' +
+    '<div style="display:flex;gap:6px;margin-bottom:8px;">' +
+    '<button type="button" data-m="all" style="' + CM_BTN + 'margin:0;text-align:center;padding:9px 4px;' + SEL + '">រាល់ថ្ងៃ</button>' +
+    '<button type="button" data-m="we" style="' + CM_BTN + 'margin:0;text-align:center;padding:9px 4px;">សៅរ៍-អាទិត្យ</button></div>' +
+    '<div style="font-size:12px;color:#6b7686;margin-bottom:4px;">ឬរើសថ្ងៃក្នុងសប្តាហ៍៖</div>' +
+    '<div style="display:flex;margin:0 -2px 10px;">' + wdHtml + '</div>' +
+    '<div style="font-size:12px;color:#6b7686;margin-bottom:10px;">ដាក់ក្នុងប្រអប់ព្រឹកដែលនៅទទេ (ពេញ ឬមានរួច នឹងរំលង) — ចាប់ពីខែនេះ ហើយបន្តដាក់ឲខែថ្មីៗដោយស្វ័យប្រវត្តិ</div>' +
+    '<button type="button" id="baGo" style="' + CM_GO + '">ដាក់ និងចងចាំ</button>' +
+    '<button type="button" id="baX" style="' + CM_BTN + 'text-align:center;color:#6b7686;margin-bottom:0;">បិទ</button>');
+  function paint() {
+    ov.querySelectorAll('button[data-w]').forEach(function (b) {
+      var on = wd.indexOf(+b.dataset.w) !== -1;
+      b.style.borderColor = on ? '#2f6fed' : '#d6dbe6'; b.style.background = on ? '#e6eefc' : '#f7f9fd';
+    });
+    ov.querySelectorAll('button[data-m]').forEach(function (b) {
+      var on = wdText(wd) === (b.dataset.m === 'all' ? 'រាល់ថ្ងៃ' : 'សៅរ៍-អាទិត្យ');
+      b.style.borderColor = on ? '#2f6fed' : '#d6dbe6'; b.style.background = on ? '#e6eefc' : '#f7f9fd';
+    });
+  }
+  paint();
+  ov.querySelectorAll('button[data-p]').forEach(function (b) { b.addEventListener('click', function () { document.getElementById('baTime').value = b.dataset.p; }); });
+  ov.querySelectorAll('button[data-m]').forEach(function (b) { b.addEventListener('click', function () { wd = b.dataset.m === 'all' ? [0, 1, 2, 3, 4, 5, 6] : [0, 6]; paint(); }); });
+  ov.querySelectorAll('button[data-w]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var w = +b.dataset.w, ix = wd.indexOf(w);
+      if (ix === -1) wd.push(w); else wd.splice(ix, 1);
+      paint();
+    });
+  });
+  ov.querySelectorAll('button[data-del]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      STATE.addRules = (STATE.addRules || []).filter(function (r) { return r.id !== b.dataset.del; });
+      persistRemoteState(); closeCellMenu(); showToast('លុបក្បួនរួចរាល់ ✓ (ប្រអប់ដែលបានដាក់នៅដដែល)');
+    });
+  });
+  document.getElementById('baX').addEventListener('click', closeCellMenu);
+  document.getElementById('baGo').addEventListener('click', function () {
+    var name = document.getElementById('baDoc').value;
+    var t = document.getElementById('baTime').value.trim();
+    if (t && !parseTimeRange1(t)) { showToast('⚠ ម៉ោងមិនត្រឹមត្រូវ — ឧ. 8am-11am'); return; }
+    if (!wd.length) { showToast('⚠ សូមរើសថ្ងៃ'); return; }
+    closeCellMenu();
+    STATE.addRules = STATE.addRules || [];
+    var rule = { id: 'ar_' + Date.now(), doctor: name, time: t, wd: wd.slice(), start: ym, applied: {} };
+    rule.applied[ym] = true;
+    STATE.addRules.push(rule);
+    var res = addDoctorToMonth(name, t, rule.wd, ym);
+    purgeFutureLogs(); renderSchedule(); persistRemoteState(); scheduleBackup();
+    var msg = '➕ ' + name + ' (' + wdText(rule.wd) + ') — ដាក់ ' + res.added + ' ថ្ងៃ · ចងចាំសម្រាប់ខែបន្ទាប់';
+    if (res.full.length) msg += ' · ពេញ: ' + res.full.join(', ');
+    if (res.has) msg += ' · មានរួច: ' + res.has;
+    showToast(msg);
+  });
+}
+window.openBulkAdd = openBulkAdd;
 
 function saveCellValue(date, field, value) {
   if (!canEditMonth(date.slice(0, 7))) { showToast('👁 ខែនេះមិនទាន់បើកឲ្យកែទេ'); renderSchedule(); return false; }
@@ -2907,8 +3097,7 @@ function computePayrollClient(year, month) {
 
   rows.forEach(function (r) {
     nameCols.forEach(function (col) {
-      var rawName = r[col.id];
-      if (!rawName) return;
+      cellSegments(r[col.id]).forEach(function (rawName) {
       var name = baseDoctorName(rawName);
       if (!name) return;
       var doc = findDoctorByNameClient(name);
@@ -2929,6 +3118,7 @@ function computePayrollClient(year, month) {
       else if (isMorning) { spvCounts[key].dayShifts++; dd.d = true; if (th) dd.dh += th; else dd.du = true; }
       else { spvCounts[key].dayShifts++; dd.d = true; if (th) dd.dh += th; else dd.du = true; } // fallback: anything not explicitly "យប់" counts as day
       spvCounts[key].shifts++;
+      });
     });
   });
 
